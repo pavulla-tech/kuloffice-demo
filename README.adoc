@@ -1,0 +1,154 @@
+= KulOffice
+:toc: left
+:toclevels: 3
+:icons: font
+:source-highlighter: highlight.js
+
+== Overview
+
+KulOffice is a self-hosted embedding database service that allows you to store and manage vector embeddings for your applications.
+
+== Prerequisites
+
+* Docker
+* Docker Compose
+* Make (optional, but recommended)
+
+== Quick Start
+
+=== Clone the repository:
+[source,bash]
+----
+git clone https://github.com/pavulla-tech/kuloffice-demo.git
+cd kuloffice-demo
+----
+
+=== Set up the environment:
+[source,bash]
+----
+make setup
+----
+
+=== Configure your `.env` file with appropriate values:
+[source,properties]
+----
+POSTGRES_USER=kuloffice
+POSTGRES_PASSWORD=your_secure_password
+POSTGRES_DB=kuloffice
+POSTGRES_PORT=5432
+KULOFFICE_DATABASE_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@kuloffice-db:5432/${POSTGRES_DB}
+KULOFFICE_LICENSE_KEY=your_license_key
+KULOFFICE_BOOTSTRAP_API_BASE_URL=http://localhost:8080
+KULOFFICE_BOOTSTRAP_SYSTEM_USER=true
+KULOFFICE_BOOTSTRAP_SYSTEM_USER_USERNAME=system
+KULOFFICE_BOOTSTRAP_SYSTEM_USER_PASSWORD=system
+KULOFFICE_BOOTSTRAP_SYSTEM_USER_EMAIL=system@example.com
+KULOFFICE_BOOTSTRAP_SYSTEM_USER_FIRST_NAME=System
+KULOFFICE_BOOTSTRAP_SYSTEM_USER_LAST_NAME=User
+KULOFFICE_BOOTSTRAP_IDP=true
+KULOFFICE_BOOTSTRAP_IDP_NAME=Google
+KULOFFICE_BOOTSTRAP_IDP_TYPE=oidc
+KULOFFICE_BOOTSTRAP_IDP_DISCOVERY_URL=https://accounts.google.com/.well-known/openid-configuration
+KULOFFICE_BOOTSTRAP_IDP_CLIENT_ID=your_client_id
+KULOFFICE_BOOTSTRAP_IDP_CLIENT_SECRET=your_client_secret
+KULOFFICE_BOOTSTRAP_IDP_ISSUER_URL=https://accounts.google.com
+KULOFFICE_LICENSE_KEY=your_license_key
+----
+
+=== Start the application:
+[source,bash]
+----
+make start
+----
+
+== Available Make Commands
+
+[cols="1,2"]
+|===
+|Command |Description
+
+|`make help`
+|Display available commands
+
+|`make setup`
+|Create .env file from .env.example
+
+|`make start`
+|Start all containers
+
+|`make stop`
+|Stop all containers
+
+|`make restart`
+|Restart all containers
+
+|`make logs`
+|View container logs
+
+|`make clean`
+|Remove all containers and volumes
+
+|`make rebuild`
+|Rebuild and restart all containers
+|===
+
+== Project Structure
+
+[source]
+----
+.
+├── docker-compose.yml    # Docker compose configuration
+├── Makefile             # Make commands for easy management
+├── .env.example         # Example environment variables
+└── README.adoc          # This file
+----
+
+== Configuration
+
+=== Environment Variables
+
+[cols="1,1,2"]
+|===
+|Variable |Default |Description
+
+|POSTGRES_USER
+|kuloffice
+|PostgreSQL database user
+
+|POSTGRES_PASSWORD
+|kuloffice
+|PostgreSQL database password
+
+|POSTGRES_DB
+|kuloffice
+|PostgreSQL database name
+
+|POSTGRES_PORT
+|5432
+|PostgreSQL port mapping
+
+|KULOFFICE_DATABASE_URL
+|-
+|Full database connection URL
+|===
+
+|KULOFFICE_LICENSE_KEY
+|your_license_key
+|License key for KulOffice
+
+|KULOFFICE_BOOTSTRAP_API_BASE_URL
+|http://localhost:8080
+|Base URL for the KulOffice Bootstrap API
+
+
+== Contributing
+
+1. Fork the repository
+2. Create your feature branch (`git checkout -b feature/amazing-feature`)
+3. Commit your changes (`git commit -m 'Add some amazing feature'`)
+4. Push to the branch (`git push origin feature/amazing-feature`)
+5. Open a Pull Request
+
+== License
+
+This project is licensed under the MIT License - see the LICENSE file for details. 
