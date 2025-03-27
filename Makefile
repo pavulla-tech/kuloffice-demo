@@ -30,7 +30,8 @@ stop:
 
 # Restart containers
 restart:
-	docker compose --env-file .env restart
+	docker compose --env-file .env down
+	docker compose --env-file .env up -d
 
 # View logs
 logs:
@@ -43,6 +44,11 @@ clean:
 
 # Rebuild and restart
 rebuild:
-	docker compose --env-file .env down
+	docker compose --env-file .env down -v
 	docker compose --env-file .env build --no-cache
 	docker compose --env-file .env up -d 
+
+update:
+	docker compose --env-file .env down -v
+	docker compose pull
+	docker compose up -d
