@@ -37,7 +37,7 @@ restart:
 logs:
 	docker compose --env-file .env logs -f
 
-# Clean everything
+# Clean everythingt
 clean:
 	docker compose --env-file .env down -v
 	rm -f .env
