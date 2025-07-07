@@ -1,1 +1,33 @@
 GET http://localhost:8080/v1/customers
+
+
+{
+    "msgid": "00000000000001233124312",
+    "clie_nome": "HELTON GUAMBE",
+    "clie_nuit":"130195113",
+    "clie_resi":"1",
+    "clie_datn":"07-04-2003",
+    "clie_gene":"M",
+    "clie_nomp":"ALBERTO HORÁCIO",
+    "clie_nomm":"HELENA FELICIDADE PECHISSO JOSEFA",
+    "clie_tipd":"1",
+    "clie_nide":"110504428729M",
+    "clie_caci":"MZ",
+    "clie_natu":"1005010000",
+    "clie_loca":"1005010000",
+    "clie_bair":"MAGOANINE-C",
+    "clie_ende":"Q.46 CASA 36 MAGOANINE-C KAMUBUCUANA",
+    "clie_numr":"11078",
+    
+}
+
+###
+POST http://localhost:8080/v1/customers/cus_2zPHmq9GL3SHsMRKSwShIIRfCWM/payment_methods/pm_2zPI25YpFn6TkNJQYn359GCVRKh/transaction
+
+{
+  "transaction_type": "transfer",
+  "amount": 200,
+  "currency": "MZN",
+  "description": "description",
+  "destination": "+258842849400"
+}
