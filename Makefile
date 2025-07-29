@@ -52,3 +52,6 @@ update:
 	docker compose --env-file .env down -v
 	docker compose pull
 	docker compose up -d
+
+db:
+	docker compose exec kuloffice-db bash

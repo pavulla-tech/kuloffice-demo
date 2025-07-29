@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>KYC Automation</title>
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+        padding: 20px;
+      }
+      input,
+      select,
+      button {
+        margin: 8px 0;
+        display: block;
+      }
+      .customer-block {
+        border: 1px solid #ccc;
+        padding: 15px;
+        margin-bottom: 20px;
+      }
+      pre {
+        background: #f0f0f0;
+        padding: 10px;
+        white-space: pre-wrap;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>KYC Automation</h1>
+    <!-- API key kept for future use -->
+    <label
+      >API Key (optional):
+      <input type="text" id="apiKey" size="50" placeholder="{{apiKey}}"
+    /></label>
+    <label
+      >Reviewer ID: <input type="text" id="reviewerId" value="emp_7890"
+    /></label>
+    <label
+      >Number of Customers:
+      <input type="number" id="customerCount" value="1" min="1"
+    /></label>
+    <button type="button" id="addCustomersBtn">Add Customers</button>
+    <form id="kycForm">
+      <div id="customerContainer"></div>
+      <button type="submit" id="submitBtn" disabled>
+        Start KYC Automation
+      </button>
+    </form>
+
+    <script>
+      const addBtn = document.getElementById("addCustomersBtn");
+      const submitBtn = document.getElementById("submitBtn");
+      const container = document.getElementById("customerContainer");
+
+      addBtn.addEventListener("click", generateCustomerBlocks);
+
+      function generateCustomerBlocks() {
+        const count = parseInt(
+          document.getElementById("customerCount").value,
+          10
+        );
+        container.innerHTML = "";
+
+        for (let i = 0; i < count; i++) {
+          const block = document.createElement("div");
+          block.className = "customer-block";
+          block.innerHTML = `
+          <h3>Customer ${i + 1}</h3>
+          <label>Phone Number:<br>
+            <input type="text" name="phone_${i}" value="+258">
+          </label>
+          <label>Document Type:<br>
+            <select name="doc_type_${i}">
+              <option value="BI">BI</option>
+              <option value="passport">Passport</option>
+            </select>
+          </label>
+          <label>ID Front:<br>
+            <input type="file" name="id_front_${i}" accept="image/*">
+          </label>
+          <label>ID Back:<br>
+            <input type="file" name="id_back_${i}" accept="image/*">
+          </label>
+          <label>Selfie:<br>
+            <input type="file" name="selfie_${i}" accept="image/*">
+          </label>
+          <pre id="log_${i}">Logs will appear here...</pre>
+        `;
+          container.appendChild(block);
+        }
+        submitBtn.disabled = false;
+      }
+
+      document
+        .getElementById("kycForm")
+        .addEventListener("submit", async function (e) {
+          e.preventDefault();
+          const apiKey = document.getElementById("apiKey").value || undefined;
+          const reviewerId = document.getElementById("reviewerId").value;
+          const count = parseInt(
+            document.getElementById("customerCount").value,
+            10
+          );
+
+          for (let i = 0; i < count; i++) {
+            const log = document.getElementById(`log_${i}`);
+            // Use querySelectorAll within container to ensure elements exist
+            const phoneInput = container.querySelector(`[name=phone_${i}]`);
+            const docSelect = container.querySelector(`[name=doc_type_${i}]`);
+            const idFrontInput = container.querySelector(
+              `[name=id_front_${i}]`
+            );
+            const idBackInput = container.querySelector(`[name=id_back_${i}]`);
+            const selfieInput = container.querySelector(`[name=selfie_${i}]`);
+
+            if (
+              !phoneInput ||
+              !docSelect ||
+              !idFrontInput ||
+              !idBackInput ||
+              !selfieInput
+            ) {
+              console.error(`Missing input for customer ${i}`);
+              log.textContent = `❌ Missing inputs for customer ${i + 1}`;
+              continue;
+            }
+
+            const phone = phoneInput.value;
+            const docType = docSelect.value;
+            const idFront = idFrontInput.files[0];
+            const idBack = idBackInput.files[0];
+            const selfie = selfieInput.files[0];
+
+            log.textContent = `🔄 Initializing ${phone}...`;
+            try {
+              // Step 1: INIT
+              const initResp = await fetch(
+                "http://153.92.209.19:8080/v1/customers/initiate",
+                {
+                  method: "POST",
+                  headers: {
+                    "Content-Type": "application/json",
+                    Accept: "application/json",
+                    ...(apiKey && { Authorization: apiKey }),
+                  },
+                  body: JSON.stringify({ phone_number: phone }),
+                }
+              ).then((r) => r.json());
+
+              log.textContent = `🔄 session ${initResp.session_id} otp ${initResp.otp}...`;
+
+              // Step 2: VERIFY
+              const verifyResp = await fetch(
+                "http://153.92.209.19:8080/v1/customers",
+                {
+                  method: "POST",
+                  headers: {
+                    "Content-Type": "application/json",
+                    Accept: "application/json",
+                    ...(apiKey && { Authorization: apiKey }),
+                  },
+                  body: JSON.stringify({
+                    session_id: initResp.session_id,
+                    verification_code: initResp.otp,
+                  }),
+                }
+              ).then((r) => r.json());
+              const customerId = verifyResp.customer_id;
+              log.textContent = `🔄 customer id ${customerId}...`;
+
+              // Step 3: UPLOAD DOCUMENT
+              const docForm = new FormData();
+              docForm.append("doc_type", docType);
+              docForm.append("image1", idFront);
+              docForm.append("image2", idBack);
+              const docResp = await fetch(
+                `http://153.92.209.19:8080/v1/customers/${customerId}/upload-document`,
+                {
+                  method: "POST",
+                  headers: {
+                    Accept: "application/json",
+                    ...(apiKey && { Authorization: apiKey }),
+                  },
+                  body: docForm,
+                }
+              ).then((r) => r.json());
+              log.textContent = `🔄 reference ${docResp.reference}...`;
+
+              // Step 4: UPLOAD SELFIE
+              const selfieForm = new FormData();
+              selfieForm.append("image", selfie);
+              selfieForm.append("reference", docResp.reference);
+              await fetch(
+                `http://153.92.209.19:8080/v1/customers/${customerId}/upload-selfie`,
+                {
+                  method: "POST",
+                  headers: {
+                    Accept: "application/json",
+                    ...(apiKey && { Authorization: apiKey }),
+                  },
+                  body: selfieForm,
+                }
+              );
+              log.textContent = `🔄 verified selfie ${customerId}...`;
+
+              // Step 5: FETCH KYC LIST
+              const kycList = await fetch(
+                `http://153.92.209.19:8080/v1/customers/${customerId}/kyc`,
+                {
+                  method: "GET",
+                  headers: {
+                    Accept: "application/json",
+                    ...(apiKey && { Authorization: apiKey }),
+                  },
+                }
+              ).then((r) => r.json());
+              const kycId = kycList.data[0]?.id;
+              console.log(kycList);
+              log.textContent = `🔄 kyc id ${kycId}...`;
+
+              // Step 6: REVIEW KYC
+              const kycResp = await fetch(
+                `http://153.92.209.19:8080/v1/customers/${customerId}/kyc/${kycId}/reviews`,
+                {
+                  method: "PUT",
+                  headers: {
+                    "Content-Type": "application/json",
+                    Accept: "application/json",
+                    ...(apiKey && { Authorization: apiKey }),
+                  },
+                  body: JSON.stringify({
+                    status: "verified",
+                    reviewer_id: reviewerId,
+                  }),
+                }
+              ).then((r) => r.json());
+
+              console.log(kycResp);
+
+              log.textContent = `🔄customer status  ${kycResp.kyc.status}...`;
+
+              await setTimeout(2000);
+              log.textContent = `✅ Customer ${customerId} onboarded successfully.`;
+              
+            } catch (err) {
+              console.error(err);
+              log.textContent = `❌ Error for ${phone}: ${err.message}`;
+            }
+          }
+        });
+
+      // Generate initial block
+      generateCustomerBlocks();
+    </script>
+  </body>
+</html>
