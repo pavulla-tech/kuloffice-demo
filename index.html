@@ -136,7 +136,8 @@
             try {
               // Step 1: INIT
               const initResp = await fetch(
-                "http://153.92.209.19:8080/v1/customers/initiate",
+                //"http://153.92.209.19:8080/v1/customers/initiate",
+                "http://localhost:8080/v1/customers/initiate",
                 {
                   method: "POST",
                   headers: {
@@ -152,7 +153,8 @@
 
               // Step 2: VERIFY
               const verifyResp = await fetch(
-                "http://153.92.209.19:8080/v1/customers",
+                //"http://153.92.209.19:8080/v1/customers",
+                "http://localhost:8080/v1/customers",
                 {
                   method: "POST",
                   headers: {
@@ -175,7 +177,8 @@
               docForm.append("image1", idFront);
               docForm.append("image2", idBack);
               const docResp = await fetch(
-                `http://153.92.209.19:8080/v1/customers/${customerId}/upload-document`,
+                //`http://153.92.209.19:8080/v1/customers/${customerId}/upload-document`,
+                `http://localhost:8080/v1/customers/${customerId}/upload-document`,
                 {
                   method: "POST",
                   headers: {
@@ -192,7 +195,8 @@
               selfieForm.append("image", selfie);
               selfieForm.append("reference", docResp.reference);
               await fetch(
-                `http://153.92.209.19:8080/v1/customers/${customerId}/upload-selfie`,
+                //`http://153.92.209.19:8080/v1/customers/${customerId}/upload-selfie`,
+                `http://localhost:8080/v1/customers/${customerId}/upload-selfie`,
                 {
                   method: "POST",
                   headers: {
@@ -206,7 +210,8 @@
 
               // Step 5: FETCH KYC LIST
               const kycList = await fetch(
-                `http://153.92.209.19:8080/v1/customers/${customerId}/kyc`,
+                //`http://153.92.209.19:8080/v1/customers/${customerId}/kyc`,
+                `http://localhost:8080/v1/customers/${customerId}/kyc`,
                 {
                   method: "GET",
                   headers: {
@@ -221,7 +226,8 @@
 
               // Step 6: REVIEW KYC
               const kycResp = await fetch(
-                `http://153.92.209.19:8080/v1/customers/${customerId}/kyc/${kycId}/reviews`,
+                //`http://153.92.209.19:8080/v1/customers/${customerId}/kyc/${kycId}/reviews`,
+                `http://localhost:8080/v1/customers/${customerId}/kyc/${kycId}/reviews`,
                 {
                   method: "PUT",
                   headers: {
