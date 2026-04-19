@@ -36,6 +36,12 @@
     <label
       >Reviewer ID: <input type="text" id="reviewerId" value="emp_7890"
     /></label>
+    <label for="urlpicker">
+      <select id="urlpicker" name="doc_type_${i}">
+        <option value="localhost:8080">Local</option>
+        <option value="153.92.209.19:8080">Remote</option>
+      </select></label
+    >
     <label
       >Number of Customers:
       <input type="number" id="customerCount" value="1" min="1"
@@ -113,6 +119,7 @@
             );
             const idBackInput = container.querySelector(`[name=id_back_${i}]`);
             const selfieInput = container.querySelector(`[name=selfie_${i}]`);
+            const urlselector = document.getElementById("urlpicker");
 
             if (
               !phoneInput ||
@@ -131,12 +138,13 @@
             const idFront = idFrontInput.files[0];
             const idBack = idBackInput.files[0];
             const selfie = selfieInput.files[0];
+            const url = urlselector.value;
 
             log.textContent = `🔄 Initializing ${phone}...`;
             try {
               // Step 1: INIT
               const initResp = await fetch(
-                "http://153.92.209.19:8080/v1/customers/initiate",
+                `http://${url}/v1/customers/initiate`,
                 {
                   method: "POST",
                   headers: {
@@ -151,21 +159,18 @@
               log.textContent = `🔄 session ${initResp.session_id} otp ${initResp.otp}...`;
 
               // Step 2: VERIFY
-              const verifyResp = await fetch(
-                "http://153.92.209.19:8080/v1/customers",
-                {
-                  method: "POST",
-                  headers: {
-                    "Content-Type": "application/json",
-                    Accept: "application/json",
-                    ...(apiKey && { Authorization: apiKey }),
-                  },
-                  body: JSON.stringify({
-                    session_id: initResp.session_id,
-                    verification_code: initResp.otp,
-                  }),
-                }
-              ).then((r) => r.json());
+              const verifyResp = await fetch(`http://${url}/v1/customers`, {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                  Accept: "application/json",
+                  ...(apiKey && { Authorization: apiKey }),
+                },
+                body: JSON.stringify({
+                  session_id: initResp.session_id,
+                  verification_code: initResp.otp,
+                }),
+              }).then((r) => r.json());
               const customerId = verifyResp.customer_id;
               log.textContent = `🔄 customer id ${customerId}...`;
 
@@ -175,7 +180,7 @@
               docForm.append("image1", idFront);
               docForm.append("image2", idBack);
               const docResp = await fetch(
-                `http://153.92.209.19:8080/v1/customers/${customerId}/upload-document`,
+                `http://${url}/v1/customers/${customerId}/upload-document`,
                 {
                   method: "POST",
                   headers: {
@@ -192,7 +197,7 @@
               selfieForm.append("image", selfie);
               selfieForm.append("reference", docResp.reference);
               await fetch(
-                `http://153.92.209.19:8080/v1/customers/${customerId}/upload-selfie`,
+                `http://${url}/v1/customers/${customerId}/upload-selfie`,
                 {
                   method: "POST",
                   headers: {
@@ -206,7 +211,7 @@
 
               // Step 5: FETCH KYC LIST
               const kycList = await fetch(
-                `http://153.92.209.19:8080/v1/customers/${customerId}/kyc`,
+                `http://${url}/v1/customers/${customerId}/kyc`,
                 {
                   method: "GET",
                   headers: {
@@ -221,7 +226,7 @@
 
               // Step 6: REVIEW KYC
               const kycResp = await fetch(
-                `http://153.92.209.19:8080/v1/customers/${customerId}/kyc/${kycId}/reviews`,
+                `http://${url}/v1/customers/${customerId}/kyc/${kycId}/reviews`,
                 {
                   method: "PUT",
                   headers: {
@@ -242,7 +247,6 @@
 
               await setTimeout(2000);
               log.textContent = `✅ Customer ${customerId} onboarded successfully.`;
-              
             } catch (err) {
               console.error(err);
               log.textContent = `❌ Error for ${phone}: ${err.message}`;
