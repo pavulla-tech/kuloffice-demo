@@ -1,6 +1,6 @@
 services:
   kuloffice:
-    image: kulofficelocal
+    image: h3l70ntec/kuloffice
     container_name: kuloffice
     ports:
       # Map the HTTP port defined in .env to container port 8080.
