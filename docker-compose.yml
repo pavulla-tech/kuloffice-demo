@@ -1,6 +1,6 @@
 services:
   kuloffice:
-    image: h3l70ntec/kuloffice
+    image: kulofficelocal
     container_name: kuloffice
     ports:
       # Map the HTTP port defined in .env to container port 8080.
@@ -54,6 +54,10 @@ services:
       - KULOFFICE_IDFORT_SELFIE_LIVENESS_URL=${KULOFFICE_IDFORT_SELFIE_LIVENESS_URL}
       - KULOFFICE_IDFORT_DOWNLOAD_IMAGE_URL=${KULOFFICE_IDFORT_DOWNLOAD_IMAGE_URL}
       - KULOFFICE_IDFORT_API_KEY=${KULOFFICE_IDFORT_API_KEY}
+
+      #Admin
+      - KULOFFICE_ADMIN_EMAIL=${KULOFFICE_ADMIN_EMAIL}
+      - KULOFFICE_ADMIN_PASSWORD=${KULOFFICE_ADMIN_PASSWORD}
 
       # License
       - KULOFFICE_LICENSE_KEY=${KULOFFICE_LICENSE_KEY}
