@@ -37,7 +37,7 @@ restart:
 logs:
 	docker compose --env-file .env logs -f
 
-# Clean everything
+# Clean everythingt
 clean:
 	docker compose --env-file .env down -v
 	rm -f .env
@@ -52,3 +52,6 @@ update:
 	docker compose --env-file .env down -v
 	docker compose pull
 	docker compose up -d
+
+db:
+	docker compose exec kuloffice-db bash
