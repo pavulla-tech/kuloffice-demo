@@ -1,0 +1,250 @@
+/* KulPay login theme.
+ *
+ * Matched to the app's own screens rather than merely branded: the same radial
+ * glow over #002F34, the same logo and wordmark, the same illustration, and the
+ * same white sheet pinned to the bottom with a 28px radius. Someone moving
+ * between a native screen and a hosted one should not be able to tell which is
+ * which. Values come from lib/core/constant/colors_constants.dart and
+ * lib/module/auth/screens in the kulpay app.
+ *
+ * Selectors target what Keycloak 26 actually emits - PatternFly v5, inherited
+ * through keycloak.v2 - so `.pf-v5-c-login__main` is the card, not the `.card-pf`
+ * of older themes. The extension's templates are untouched and stay generic,
+ * which is what keeps them reusable by the other Pavulla apps.
+ */
+
+@font-face { font-family:'RadioCanadaBig'; font-weight:400; font-display:swap;
+  src:url('../fonts/RadioCanadaBig-Regular.woff2') format('woff2'); }
+@font-face { font-family:'RadioCanadaBig'; font-weight:500; font-display:swap;
+  src:url('../fonts/RadioCanadaBig-Medium.woff2') format('woff2'); }
+@font-face { font-family:'RadioCanadaBig'; font-weight:600; font-display:swap;
+  src:url('../fonts/RadioCanadaBig-SemiBold.ttf') format('truetype'); }
+@font-face { font-family:'RadioCanadaBig'; font-weight:700; font-display:swap;
+  src:url('../fonts/RadioCanadaBig-Bold.woff2') format('woff2'); }
+
+:root {
+  --kp-bg:#002F34;         /* scaffoldBackground */
+  --kp-primary:#9FE76C;    /* appPrimaryColor    */
+  --kp-text:#111A18;       /* appTxtColor        */
+  --kp-secondary:#888C8B;  /* appTextSecondary   */
+  --kp-disabled:#E7E8E7;   /* colorDisabled      */
+  --kp-red:#FF1C0F;        /* appRedColor        */
+}
+
+html, body#keycloak-bg {
+  margin:0; padding:0; min-height:100%;
+  background:var(--kp-bg);
+  font-family:'RadioCanadaBig', system-ui, -apple-system, sans-serif;
+  color:#fff; -webkit-font-smoothing:antialiased;
+}
+
+/* The app draws a RadialGradient of the primary at 40% from the top-left. */
+body#keycloak-bg::before {
+  content:''; position:fixed; inset:0; pointer-events:none; z-index:0;
+  background:radial-gradient(150% 150% at 0% 0%,
+             rgba(159,231,108,.40) 0%, rgba(159,231,108,0) 60%);
+}
+
+/* The illustration, as background images: the shared templates emit no element
+ * to hang it on, and must not have to. */
+.pf-v5-c-login {
+  position:relative; z-index:1; min-height:100vh; padding:0; display:block;
+  background:
+    url('../img/onboarding_vector.png') left 0 top 175px / auto 120px no-repeat,
+    url('../img/onboarding_vector_right.png') right 0 top 175px / auto 120px no-repeat,
+    url('../img/onboarding_man.png') center top 140px / 260px auto no-repeat;
+}
+.pf-v5-c-login__container { display:block; max-width:none; padding:0; margin:0; grid-gap:0; }
+
+/* ── header: logo + wordmark ──────────────────────────────────────────────── */
+
+#kc-header.pf-v5-c-login__header { padding:0; margin:0; }
+#kc-header-wrapper {
+  display:flex; align-items:center; justify-content:center; gap:8px;
+  padding:56px 0 0; font-size:0;   /* hides the realm name node */
+}
+#kc-header-wrapper::before {
+  content:''; width:62px; height:62px; flex:0 0 62px;
+  background:url('../img/kulpay_logo_circle.svg') center/contain no-repeat;
+}
+#kc-header-wrapper::after {
+  content:'Kulpay';                /* the app spells it with a lowercase p */
+  font-size:31px; line-height:40px; font-weight:600; color:#fff;
+}
+
+/* ── the white sheet ──────────────────────────────────────────────────────── */
+
+.pf-v5-c-login__main {
+  position:fixed; left:0; right:0; bottom:0; z-index:2;
+  box-sizing:border-box; width:100%; max-width:none;
+  min-height:330px; max-height:92vh; overflow-y:auto;
+  background:#fff; color:var(--kp-text);
+  border-radius:28px 28px 0 0; border:0; box-shadow:none;
+  padding:24px 16px calc(24px + env(safe-area-inset-bottom,0px));
+}
+.pf-v5-c-login__main-header { padding:0; margin:0; display:block; }
+.pf-v5-c-login__main-body   { padding:0; margin:0; }
+/* Keycloak furniture with no counterpart in the app. */
+.pf-v5-c-login__main-header-utilities,
+.pf-v5-c-login__main-footer,
+.pf-v5-c-login__main-footer-band,
+#kc-info, #kc-locale { display:none !important; }
+
+#kc-page-title {
+  margin:0 0 8px; padding:0;
+  font-size:28px; line-height:36px; font-weight:600;
+  color:var(--kp-text); text-align:left; white-space:pre-line;
+}
+
+/* ── form ─────────────────────────────────────────────────────────────────── */
+
+#kc-phone-form, #kc-otp-form, #kc-pin-form,
+form.pf-v5-c-form { display:flex; flex-direction:column; gap:0; }
+.pf-v5-c-form__group { display:contents; }
+
+.pf-v5-c-form__label, label {
+  display:block; margin:0 0 8px; padding:0;
+  font-size:14px; line-height:18px; font-weight:400; color:var(--kp-text);
+}
+.pf-v5-c-form__label-text { font-size:14px; font-weight:400; color:var(--kp-text); }
+
+input.pf-v5-c-form-control, .pf-v5-c-form-control > input, input[type=tel],
+input[type=text], input[type=password], input[type=number] {
+  box-sizing:border-box; width:100%; height:52px; padding:17px 18px;
+  font-family:inherit; font-size:14px; color:var(--kp-text);
+  background:#fff; border:1px solid var(--kp-disabled); border-radius:40px;
+  outline:none; box-shadow:none; --pf-v5-c-form-control--BorderBottomColor:transparent;
+}
+input.pf-v5-c-form-control:focus, input:focus {
+  border-color:var(--kp-primary); outline:none; box-shadow:none;
+}
+input::placeholder { color:var(--kp-secondary); opacity:1; }
+
+/* The hint is the app's subtitle, so it sits under the title rather than under
+ * the field. Source order is fixed by a shared template, so it moves here. */
+#phone-hint, .pf-v5-c-helper-text, .pf-v5-c-helper-text__item,
+.pf-v5-c-helper-text__item-text {
+  order:-1; display:block !important; margin:0; padding:0;
+  font-size:14px; line-height:18px; font-weight:400; color:var(--kp-secondary);
+}
+#phone-hint, .pf-v5-c-helper-text { margin-bottom:20px; }
+/* A long number must wrap rather than run under the sheet's edge. */
+.pf-v5-c-helper-text, #phone-hint { overflow-wrap:anywhere; }
+
+/* The dial prefix and phone glyph the app shows inside the field. The prefix is
+ * a real element emitted by the template, so it is laid out against the input
+ * rather than guessed at with an offset. */
+.phone-input-wrap { position:relative; display:block; }
+.phone-dial-prefix {
+  position:absolute; left:48px; top:50%; transform:translateY(-50%);
+  z-index:2; font-size:14px; line-height:1; color:var(--kp-text);
+  pointer-events:none;
+}
+.phone-dial-prefix:empty { display:none; }
+.phone-input-wrap:has(.phone-dial-prefix:empty) #phone_number { padding-left:48px; }
+
+#phone_number {
+  padding-left:92px;
+  background:url('../img/phone_calling_rounded.svg') 18px center / 20px 20px no-repeat;
+}
+
+/* The one-time code, drawn as the six separate boxes the app uses.
+ *
+ * It is still ONE input - a template shared with the other apps must not grow
+ * six fields for one of them, and six fields would need JavaScript to move the
+ * caret, paste a code, or be read by a password manager. The boxes are a
+ * repeated background and the digits are spaced to land in them, so behaviour
+ * stays a plain text field and only the appearance changes.
+ *
+ * 50px box + 8px gap matches CommonProps.defaultPinTheme; the width is exactly
+ * six boxes wide, so the repeat cannot draw a seventh.
+ */
+#code {
+  /* 46/7 rather than the app's 50/8, and smaller still when the form is too
+   * narrow for the field below: it must fit whole, or max-width clips it, the
+   * caret after the sixth digit is outside it again, and the code jumps left.
+   * That happened at 360px wide (an Android's usual width), where 46/7 leaves
+   * the field 7px wider than the sheet. The field is 341/46 of a box less half
+   * a digit, solved here for the box; cqi is the form's width. */
+  --kp-box:min(46px, (100cqi + 0.5ch) * 46 / 341);
+  --kp-gap:calc(var(--kp-box) * 7 / 46);
+  box-sizing:content-box;
+  /* Wide enough for the caret that follows the sixth digit.
+   *
+   * letter-spacing is added AFTER every character, the last one included, so six
+   * digits occupy six whole tiles and the caret sits one tile-gap beyond them.
+   * At a width of exactly six tiles that caret is outside the field, and the
+   * browser scrolls the content left to bring it into view - the whole code
+   * jumps sideways the moment it is complete. The indent is added back so the
+   * content box fits what is actually in it. */
+  width:calc(6 * (var(--kp-box) + var(--kp-gap)) + (var(--kp-box) - 1ch) / 2);
+  max-width:100%; height:54px; padding:0; margin:0 auto;
+  border:0; border-radius:0; background-color:transparent;
+  font-family:inherit; font-size:20px; font-weight:600; color:var(--kp-text);
+  text-align:left;
+  /* The whole trick rests on 1ch being the width of a digit, and ch is defined
+   * as the advance of "0" alone. In a proportional face the other nine differ,
+   * so each one lands a little further from where the box is drawn and the code
+   * walks out of its boxes by the sixth digit. Tabular figures make every digit
+   * as wide as "0", which is what the arithmetic below already assumed. */
+  font-variant-numeric:tabular-nums;
+  font-feature-settings:"tnum" 1;
+  letter-spacing:calc(var(--kp-box) + var(--kp-gap) - 1ch);
+  text-indent:calc((var(--kp-box) - 1ch) / 2);
+  /* The tile is box + gap wide and the rect inside it is the box, so the SVG
+   * carries the gap itself. Drawing a 46-wide SVG into a 53-wide tile would not
+   * leave a gap - background-size stretches the image - and the boxes would come
+   * out 53 wide and touching, with the digits sitting left of centre. The 53 and
+   * 46 below are --kp-gap and --kp-box; a data URI cannot read a custom
+   * property, so changing one means changing the other. */
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='318' height='54'%3E%3Crect x='0.5' y='.5' width='45' height='53' rx='12' fill='none' stroke='%23002F34'/%3E%3Crect x='53.5' y='.5' width='45' height='53' rx='12' fill='none' stroke='%23002F34'/%3E%3Crect x='106.5' y='.5' width='45' height='53' rx='12' fill='none' stroke='%23002F34'/%3E%3Crect x='159.5' y='.5' width='45' height='53' rx='12' fill='none' stroke='%23002F34'/%3E%3Crect x='212.5' y='.5' width='45' height='53' rx='12' fill='none' stroke='%23002F34'/%3E%3Crect x='265.5' y='.5' width='45' height='53' rx='12' fill='none' stroke='%23002F34'/%3E%3C/svg%3E");
+  /* Not repeat-x: the field is now wider than six tiles, and a repeating
+   * background would draw a seventh box in the space the caret lives in. One
+   * image of exactly six, drawn once. */
+  background-repeat:no-repeat;
+  background-size:calc(6 * (var(--kp-box) + var(--kp-gap))) 54px;
+  background-position:left center;
+}
+#code:focus { border:0; outline:none; }
+/* The width the boxes above are measured against. */
+#kc-otp-code-form { container-type:inline-size; }
+/* The caret ends a tile past the sixth digit's start, so once the code is
+ * complete it would blink to the right of the last box. The field is clipped to
+ * the six boxes (and the last one's rule): the caret shows in the box being
+ * typed into and disappears once there is nothing left to type. */
+#code { clip-path:inset(0 calc(100% - 6 * var(--kp-box) - 5 * var(--kp-gap) - 1px) 0 0); }
+/* The app shows no label above the boxes - the title and subtitle say it. */
+label[for=code] { display:none; }
+#code::placeholder { color:transparent; }
+/* The code page's "back" link while registering: under the button, as the
+ * text link the app shows, not a second button. */
+.kp-back-button { order:1; display:block; margin-top:16px; text-align:center; }
+
+input.pf-v5-c-button.pf-m-primary, #kc-login, input[type=submit] {
+  box-sizing:border-box; width:100%; height:48px; margin-top:20px;
+  font-family:inherit; font-size:14px; font-weight:600;
+  color:var(--kp-text); background:var(--kp-primary);
+  border:0; border-radius:32px; cursor:pointer; --pf-v5-c-button--BorderRadius:32px;
+}
+input.pf-v5-c-button.pf-m-primary:hover { background:#93dd5e; color:var(--kp-text); }
+input.pf-v5-c-button.pf-m-primary:disabled {
+  background:var(--kp-disabled); color:var(--kp-secondary); cursor:default;
+}
+
+a { color:var(--kp-text); font-size:14px; text-decoration:underline; }
+
+/* ── messages ─────────────────────────────────────────────────────────────── */
+
+.pf-v5-c-alert, .kc-feedback-text, #kc-error-message {
+  order:-2; margin:0 0 16px; padding:12px 14px;
+  border:0; border-radius:14px; font-size:14px; line-height:18px;
+  background:#FDECEA; color:var(--kp-red);
+}
+.pf-v5-c-alert.pf-m-success { background:#EFF9E8; color:#328D00; }
+.pf-v5-c-alert__icon, .pf-v5-c-alert__title::before { display:none; }
+.pf-v5-c-alert__title { font-size:14px; font-weight:400; padding:0; }
+
+@media (max-height:700px) {
+  .pf-v5-c-login { background-size:auto 90px, auto 90px, 190px auto; }
+  #kc-header-wrapper { padding-top:28px; }
+}

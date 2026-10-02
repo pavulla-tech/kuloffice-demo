@@ -1,0 +1,325 @@
+# KulPay on one server, in one compose stack: Keycloak, kuloffice, the web app,
+# the token panel, Solange (QR codes) and its console, MinIO behind a boquisso
+# file server, and Postgres for all of them. kulportal is ready to switch on
+# (profile `portal`).
+#
+# Run it through the Makefile (`make help`): it passes .env and checks it.
+#
+# Apache on the host terminates TLS. Every service is published on 127.0.0.1
+# only, on the ports in .env, and Apache's vhosts proxy to them (see apache/).
+# The server never builds: every image is built on a laptop and pulled from
+# Docker Hub (make images / make push there, make update here).
+
+x-restart: &restart
+  restart: unless-stopped
+  networks: [kulpay]
+  logging:
+    driver: json-file
+    options: { max-size: "20m", max-file: "5" }
+
+networks:
+  kulpay:
+    # A fixed subnet, so services can trust what arrives from the host (Apache)
+    # by address: it reaches them through this network's gateway.
+    ipam:
+      config:
+        - subnet: ${STACK_SUBNET:-172.30.0.0/24}
+          gateway: ${STACK_GATEWAY:-172.30.0.1}
+
+volumes:
+  db-data:
+  minio-data:
+  token-panel-data:
+
+services:
+  # One Postgres for every service, each with its own database and role
+  # (db/init.sh, on the first start only).
+  db:
+    <<: *restart
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${DB_ROOT_PASSWORD:?set DB_ROOT_PASSWORD}
+      KULOFFICE_DB_PASSWORD: ${KULOFFICE_DB_PASSWORD:?set KULOFFICE_DB_PASSWORD}
+      KEYCLOAK_DB_PASSWORD: ${KEYCLOAK_DB_PASSWORD:?set KEYCLOAK_DB_PASSWORD}
+      SOLANGE_DB_PASSWORD: ${SOLANGE_DB_PASSWORD:?set SOLANGE_DB_PASSWORD}
+    volumes:
+      - db-data:/var/lib/postgresql/data
+      - ./db:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  # ---- identity ---------------------------------------------------------------
+
+  keycloak:
+    <<: *restart
+    image: ${KEYCLOAK_IMAGE:-developerspavs/kulpay-keycloak}:${KEYCLOAK_TAG:?set KEYCLOAK_TAG}
+    depends_on:
+      db: { condition: service_healthy }
+    command:
+      - start
+      - --optimized
+      # Real SMS: codes cost money and go to real handsets.
+      - --spi-phone-auth-sms-sender--provider=http
+      - --spi-phone-auth-sms-sender--http--base-url=${OLA_SMS_BASE_URL:?set OLA_SMS_BASE_URL}
+      - --spi-phone-auth-sms-sender--http--api-key=${OLA_SMS_API_KEY:?set OLA_SMS_API_KEY}
+      - --spi-phone-auth-sms-sender--http--provider-id=${OLA_SMS_PROVIDER_ID:?set OLA_SMS_PROVIDER_ID}
+      # Origins the mobile apps present during a passkey ceremony (see .env).
+      - --spi-phone-auth-app-origins=${PASSKEY_APP_ORIGINS:-}
+      - --log-level=INFO,com.pavulla.keycloak.phoneauth:${KC_PHONEAUTH_LOG_LEVEL:-info}
+    environment:
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://db:5432/keycloak
+      KC_DB_USERNAME: keycloak
+      KC_DB_PASSWORD: ${KEYCLOAK_DB_PASSWORD}
+      # The public URL: the token issuer and the passkey rpId. Changing it
+      # later invalidates every token and passkey.
+      KC_HOSTNAME: ${KEYCLOAK_PUBLIC_URL:?set KEYCLOAK_PUBLIC_URL}
+      # Behind Apache: plain HTTP inside, scheme and host from the forwarded
+      # headers (the vhost must send X-Forwarded-Proto: https).
+      KC_HTTP_ENABLED: "true"
+      KC_PROXY_HEADERS: xforwarded
+      KC_HEALTH_ENABLED: "true"
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${KC_ADMIN_USER:-admin}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KC_ADMIN_PASSWORD:?set KC_ADMIN_PASSWORD}
+    # The KulPay login theme the mobile app's look comes from: intaka's
+    # demo/theme, copied here by `make theme` so the server needs no intaka
+    # checkout. It overrides the theme in the image, whose templates it must
+    # match (one code field since 26.7.4-5).
+    volumes:
+      - ./theme/kulpay:/opt/keycloak/themes/kulpay:ro
+    ports:
+      - "127.0.0.1:${KEYCLOAK_PORT:-9180}:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/9000 && printf 'GET /health/ready HTTP/1.0\\r\\n\\r\\n' >&3 && grep -q UP <&3"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+
+  # ---- files ------------------------------------------------------------------
+
+  minio:
+    <<: *restart
+    image: minio/minio:RELEASE.2024-08-17T01-24-54Z
+    command: ["server", "/data"]
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-kulpay}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD}
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  # kuloffice's buckets. Images wait in the pending bucket until a submission
+  # is accepted; its lifecycle rule removes what never is. Idempotent.
+  minio-init:
+    image: minio/mc:RELEASE.2024-08-17T11-33-50Z
+    networks: [kulpay]
+    depends_on:
+      minio: { condition: service_healthy }
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-kulpay}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+      KYC_BUCKET: ${KYC_BUCKET:-kyc}
+      PENDING_BUCKET: ${PENDING_BUCKET:-kyc-pending}
+      PENDING_EXPIRY_DAYS: ${PENDING_EXPIRY_DAYS:-1}
+    entrypoint:
+      - sh
+      - -ec
+      - |
+        mc alias set local http://minio:9000 "$$MINIO_ROOT_USER" "$$MINIO_ROOT_PASSWORD" >/dev/null
+        mc mb --ignore-existing "local/$$KYC_BUCKET" "local/$$PENDING_BUCKET"
+        if mc ilm rule ls "local/$$PENDING_BUCKET" 2>/dev/null | grep -q Expir; then
+          echo "lifecycle rule on $$PENDING_BUCKET already set"
+        else
+          mc ilm rule add --expire-days "$$PENDING_EXPIRY_DAYS" "local/$$PENDING_BUCKET"
+        fi
+
+  # boquisso-fileserver, KulPay's own: the HTTP API kuloffice stores files
+  # through. Internal only.
+  fileserver:
+    <<: *restart
+    image: ${FILESERVER_IMAGE:-developerspavs/kulpay-fileserver}:${FILESERVER_TAG:?set FILESERVER_TAG}
+    depends_on:
+      minio-init: { condition: service_completed_successfully }
+    environment:
+      API_PORT: "8080"
+      ENDPOINT: minio:9000
+      ACCESS_KEY_ID: ${MINIO_ROOT_USER:-kulpay}
+      SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD}
+      USE_SSL: "false"
+
+  # ---- kuloffice ----------------------------------------------------------------
+
+  kuloffice:
+    <<: *restart
+    image: ${KULOFFICE_IMAGE:-developerspavs/kulpay-kuloffice}:${KULOFFICE_TAG:?set KULOFFICE_TAG}
+    depends_on:
+      db: { condition: service_healthy }
+      keycloak: { condition: service_healthy }
+      fileserver: { condition: service_started }
+    # Anything else kuloffice reads (KULOFFICE_*): MiniAiLive, BLNK, NUIB API,
+    # idfort, SMS templates. Optional; see kuloffice.env.example. The settings
+    # below win over it.
+    env_file:
+      - path: kuloffice.env
+        required: false
+    environment:
+      KULOFFICE_ENVIRONMENT: ${KULOFFICE_ENVIRONMENT:-production}
+      KULOFFICE_SERVER_HTTP_PORT: "8080"
+      KULOFFICE_SERVER_GRPC_PORT: "50051"
+      KULOFFICE_SERVER_GRPC_MAX_RECV_MSG_SIZE: "20971520"
+      KULOFFICE_SERVER_GRPC_MAX_SEND_MSG_SIZE: "20971520"
+      KULOFFICE_DATABASE_URL: postgres://kuloffice:${KULOFFICE_DB_PASSWORD}@db:5432/kuloffice?sslmode=disable
+      KULOFFICE_ADMIN_EMAIL: ${KULOFFICE_ADMIN_EMAIL:?set KULOFFICE_ADMIN_EMAIL}
+      KULOFFICE_ADMIN_PASSWORD: ${KULOFFICE_ADMIN_PASSWORD:?set KULOFFICE_ADMIN_PASSWORD}
+      # The admin API, for the PIN at the end of onboarding. Tokens are checked
+      # against the public issuer, which kuloffice fetches through Apache.
+      KULOFFICE_KEYCLOAK_BASE_URL: http://keycloak:8080
+      KULOFFICE_KEYCLOAK_REALM: ${REALM:-kulpay}
+      KULOFFICE_KEYCLOAK_CLIENT_ID: ${ADMIN_CLIENT_ID:-kulpay-backend}
+      KULOFFICE_KEYCLOAK_CLIENT_SECRET: ${ADMIN_CLIENT_SECRET:?set ADMIN_CLIENT_SECRET}
+      KULOFFICE_KEYCLOAK_ONBOARDING_ROLE: ${ONBOARDING_ROLE:-onboarding_pending}
+      KULOFFICE_SMS_BASE_URL: ${OLA_SMS_BASE_URL}
+      KULOFFICE_SMS_API_KEY: ${OLA_SMS_API_KEY}
+      KULOFFICE_SMS_PROVIDER_ID: ${OLA_SMS_PROVIDER_ID}
+      KULOFFICE_FILESERVER_UPLOAD_URL: http://fileserver:8080/upload
+      KULOFFICE_FILESERVER_DOWNLOAD_URL: http://fileserver:8080/files
+      KULOFFICE_FILESERVER_KYC_BUCKET: ${KYC_BUCKET:-kyc}
+      KULOFFICE_FILESERVER_PENDING_BUCKET: ${PENDING_BUCKET:-kyc-pending}
+      # Submissions open review cases; approvals create the customer's identity
+      # and wallet.
+      KULOFFICE_OPERATOR_REVIEW_SYNC: "true"
+      KULOFFICE_BIOMETRICS_ENABLED: ${BIOMETRICS_ENABLED:-true}
+    ports:
+      - "127.0.0.1:${KULOFFICE_PORT:-9280}:8080"
+
+  # ---- clients ----------------------------------------------------------------
+
+  web:
+    <<: *restart
+    image: ${WEB_IMAGE:-developerspavs/kulpay-web}:${WEB_TAG:?set WEB_TAG}
+    depends_on:
+      kuloffice: { condition: service_started }
+    environment:
+      PORT: "3000"
+      HOSTNAME: 0.0.0.0
+      KULPAY_WEB_URL: ${WEB_PUBLIC_URL:?set WEB_PUBLIC_URL}
+      KULPAY_KEYCLOAK_ISSUER: ${KEYCLOAK_PUBLIC_URL}/realms/${REALM:-kulpay}
+      KULPAY_KEYCLOAK_CLIENT_ID: ${WEB_CLIENT_ID:-kulpay-web}
+      KULPAY_KEYCLOAK_PASSKEY_CLIENT_ID: ${PASSKEY_CLIENT_ID:-kulpay-web-passkey}
+      KULPAY_API_URL: http://kuloffice:8080
+      KULPAY_SESSION_SECRET: ${KULPAY_SESSION_SECRET:?set KULPAY_SESSION_SECRET}
+    ports:
+      - "127.0.0.1:${WEB_PORT:-9380}:3000"
+
+  # Signs numbers and staff in and keeps their tokens fresh. It holds live
+  # tokens: Apache must put a password in front of it (apache/panel.conf).
+  token-panel:
+    <<: *restart
+    image: ${TOKEN_PANEL_IMAGE:-developerspavs/kulpay-token-panel}:${TOKEN_PANEL_TAG:?set TOKEN_PANEL_TAG}
+    depends_on:
+      keycloak: { condition: service_healthy }
+    environment:
+      PANEL_PORT: "8765"
+      PANEL_API_BASES: ${KULOFFICE_PUBLIC_URL:?set KULOFFICE_PUBLIC_URL}
+    volumes:
+      - token-panel-data:/panel
+    ports:
+      - "127.0.0.1:${PANEL_PORT:-9480}:8765"
+
+  # ---- Solange (QR codes) -----------------------------------------------------
+
+  # Applies Solange's migrations, then exits; `serve` starts after it.
+  solange-migrate:
+    image: ${SOLANGE_IMAGE:-developerspavs/kulpay-solange}:${SOLANGE_TAG:?set SOLANGE_TAG}
+    networks: [kulpay]
+    depends_on:
+      db: { condition: service_healthy }
+    command: ["migrate"]
+    environment:
+      SOLANGE_DATABASE_URL: &solange-db postgres://solange:${SOLANGE_DB_PASSWORD}@db:5432/solange?sslmode=disable
+
+  solange:
+    <<: *restart
+    image: ${SOLANGE_IMAGE:-developerspavs/kulpay-solange}:${SOLANGE_TAG}
+    depends_on:
+      solange-migrate: { condition: service_completed_successfully }
+    command: ["serve"]
+    environment:
+      SOLANGE_DATABASE_URL: *solange-db
+      SOLANGE_LISTEN: ":8090"
+      # What printed codes point at: the scan edge.
+      SOLANGE_PUBLIC_URL: ${SOLANGE_PUBLIC_URL:?set SOLANGE_PUBLIC_URL}
+      SOLANGE_VISITOR_SECRET: ${SOLANGE_VISITOR_SECRET:?set SOLANGE_VISITOR_SECRET}
+      SOLANGE_ENCRYPTION_KEY: ${SOLANGE_ENCRYPTION_KEY:?set SOLANGE_ENCRYPTION_KEY}
+      SOLANGE_BEHIND_CLOUDFLARE: ${SOLANGE_BEHIND_CLOUDFLARE:-false}
+      # Apache reaches the container through the network's gateway; only its
+      # forwarded headers are believed.
+      SOLANGE_TRUSTED_PROXIES: ${STACK_GATEWAY:-172.30.0.1}
+      # Empty: places come from Cloudflare alone (see .env).
+      SOLANGE_GEOIP_DB: ${SOLANGE_GEOIP_DB:-}
+      SOLANGE_MAXMIND_ACCOUNT_ID: ${SOLANGE_MAXMIND_ACCOUNT_ID:-}
+      SOLANGE_MAXMIND_LICENSE_KEY: ${SOLANGE_MAXMIND_LICENSE_KEY:-}
+      # Staff sign in through the workforce realm; the console's client roles
+      # (viewer, developer, admin) decide what they may do.
+      SOLANGE_KEYCLOAK_ISSUER: ${KEYCLOAK_PUBLIC_URL}/realms/${WORKFORCE_REALM:-workforce}
+      SOLANGE_KEYCLOAK_CLIENT: ${SOLANGE_CONSOLE_CLIENT_ID:-solange-console}
+    volumes:
+      - ${SOLANGE_GEOIP_DIR:-./geoip}:/geoip
+    ports:
+      - "127.0.0.1:${SOLANGE_PORT:-9580}:8090"
+
+  solange-console:
+    <<: *restart
+    image: ${SOLANGE_CONSOLE_IMAGE:-developerspavs/kulpay-solange-console}:${SOLANGE_CONSOLE_TAG:?set SOLANGE_CONSOLE_TAG}
+    depends_on:
+      solange: { condition: service_started }
+    environment:
+      SOLANGE_CONSOLE_URL: ${SOLANGE_CONSOLE_PUBLIC_URL:?set SOLANGE_CONSOLE_PUBLIC_URL}
+      SOLANGE_KEYCLOAK_ISSUER: ${KEYCLOAK_PUBLIC_URL}/realms/${WORKFORCE_REALM:-workforce}
+      SOLANGE_KEYCLOAK_CLIENT_ID: ${SOLANGE_CONSOLE_CLIENT_ID:-solange-console}
+      SOLANGE_API_URL: http://solange:8090
+      SOLANGE_PUBLIC_URL: ${SOLANGE_PUBLIC_URL}
+      SOLANGE_SESSION_SECRET: ${SOLANGE_SESSION_SECRET:?set SOLANGE_SESSION_SECRET}
+    ports:
+      - "127.0.0.1:${SOLANGE_CONSOLE_PORT:-9680}:3200"
+
+  # ---- kulportal (not ready yet) ------------------------------------------------
+
+  # Off by default: `make start-portal` once KULPORTAL_TAG is set.
+  kulportal:
+    <<: *restart
+    profiles: ["portal"]
+    image: ${KULPORTAL_IMAGE:-developerspavs/kulpay-kulportal}:${KULPORTAL_TAG:-unset}
+    env_file:
+      - path: kulportal.env
+        required: false
+    environment:
+      PORT: "3000"
+      HOSTNAME: 0.0.0.0
+    ports:
+      - "127.0.0.1:${KULPORTAL_PORT:-9780}:3000"
+
+  # ---- provisioning -------------------------------------------------------------
+
+  # The realms, their clients, kuloffice's license and identity providers, and
+  # staff accounts. Never runs on its own: `make init`, `make operator`.
+  tools:
+    image: ${TOOLS_IMAGE:-developerspavs/kulpay-tools}:${TOOLS_TAG:?set TOOLS_TAG}
+    profiles: ["tools"]
+    networks: [kulpay]
+    # The same settings as the stack (the Makefile's ENV_FILE).
+    env_file: ["${ENV_FILE:-.env}"]
+    environment:
+      # From the stack's network the master realm's admin login is allowed:
+      # Keycloak treats private addresses as local (sslRequired=external).
+      KEYCLOAK_URL: http://keycloak:8080
+      KULOFFICE_URL: http://kuloffice:8080

@@ -28,7 +28,8 @@ API = os.environ["KULOFFICE_URL"].rstrip("/")
 EMAIL = os.environ["REVIEWER_EMAIL"].strip().lower()
 ADMIN = base64.b64encode(f"{os.environ['KULOFFICE_ADMIN_EMAIL']}:{os.environ['KULOFFICE_ADMIN_PASSWORD']}".encode()).decode()
 ROLE = os.environ.get("REVIEWER_ROLE", "Revisores (local)")
-REASON = "local stack: demo reviewer"
+REASON = os.environ.get("REVIEWER_REASON", "local stack: demo reviewer")
+FIRST, LAST = os.environ.get("REVIEWER_FIRST_NAME", "Revisor"), os.environ.get("REVIEWER_LAST_NAME", "Local")
 
 # What a reviewer does: take cases, read the evidence, decide.
 PERMISSIONS = [
@@ -95,7 +96,7 @@ def main():
     operators = must(kuloffice("GET", "/v1/operators?page=1&limit=100"), "list operators").get("operators", [])
     op = next((o for o in operators if o.get("email", "").lower() == EMAIL), None)
     if not op:
-        op = must(kuloffice("POST", "/v1/operators", {"email": EMAIL, "first_name": "Revisor", "last_name": "Local"}),
+        op = must(kuloffice("POST", "/v1/operators", {"email": EMAIL, "first_name": FIRST, "last_name": LAST}),
                   "create operator")
         print(f"operator {op['id']} created for {EMAIL}")
     if op.get("status") != "active":
@@ -122,7 +123,7 @@ def main():
     role = next((r for r in roles if r.get("name") == ROLE), None)
     if not role:
         role = must(kuloffice("POST", "/v1/operator-roles", {
-            "name": ROLE, "description": "Reviewers on the local stack",
+            "name": ROLE, "description": "KYC reviewers",
             "permissions": [{"resource": r, "action": a} for r, a in PERMISSIONS],
         }), "create role")
         print(f"role '{ROLE}' created")

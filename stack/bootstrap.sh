@@ -20,12 +20,14 @@ done
 echo
 
 # The license middleware refuses everything else until one is active, so this
-# goes first. It is signed with the key whose public half the image was built
-# with (make keys).
+# goes first. A deployment passes its key (KULOFFICE_LICENSE_KEY); the local
+# stack signs one with the key whose public half the image was built with
+# (make keys).
 if [ "$(status "$api/v1/license")" = "200" ]; then
   echo "license: already active"
 else
-  key=$(kuloffice-license generate --issuer="$LICENSE_ISSUER" --priv-key=/keys/private.pem \
+  key=${KULOFFICE_LICENSE_KEY:-}
+  [ -n "$key" ] || key=$(kuloffice-license generate --issuer="$LICENSE_ISSUER" --priv-key=/keys/private.pem \
     --issued-to=kuloffice-demo --valid-days=365 --features=basic)
   curl -fsS -u "$auth" -H 'Content-Type: application/json' -X POST "$api/v1/license/activate" \
     -d "{\"license_key\":\"$key\"}" >/dev/null
