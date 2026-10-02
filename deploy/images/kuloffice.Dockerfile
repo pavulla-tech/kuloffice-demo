@@ -2,7 +2,9 @@
 # kuloffice, from a kuloffice checkout. The license public key is linked in:
 # pass it with --build-arg LICENSE_PUBLIC_KEY (the Makefile reads it from the
 # checkout's keys/public.pem.base64), or the binary refuses every license.
-FROM golang:1.25-alpine AS build
+# Compiled on the builder's own platform for the target one: no emulation.
+FROM --platform=$BUILDPLATFORM golang:1.25-alpine AS build
+ARG TARGETOS TARGETARCH
 WORKDIR /src
 COPY go.mod go.sum ./
 COPY cmd ./cmd
@@ -13,7 +15,7 @@ ARG LICENSE_PUBLIC_KEY
 ARG LICENSE_ISSUER=pavulla.com
 RUN --mount=type=cache,target=/go/pkg/mod --mount=type=cache,target=/root/.cache/go-build \
     test -n "$LICENSE_PUBLIC_KEY" || { echo "LICENSE_PUBLIC_KEY is empty" >&2; exit 1; }; \
-    CGO_ENABLED=0 go build -tags 'metrics tracing cache' -ldflags "\
+    CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -tags 'metrics tracing cache' -ldflags "\
       -X github.com/pavulla-tech/kuloffice/internal/commands.binaryName=kuloffice \
       -X github.com/pavulla-tech/kuloffice/internal/license.publicKey=$LICENSE_PUBLIC_KEY \
       -X github.com/pavulla-tech/kuloffice/internal/license.issuer=$LICENSE_ISSUER" \
