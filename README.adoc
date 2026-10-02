@@ -1,154 +1,144 @@
-= KulOffice
+= KulOffice local stack
 :toc: left
-:toclevels: 3
+:toclevels: 2
 :icons: font
 :source-highlighter: highlight.js
 
-== Overview
+Everything needed to test kuloffice end to end on one machine, in one compose
+file, configured by one command.
 
-KulOffice is a self-hosted embedding database service that allows you to store and manage vector embeddings for your applications.
+== What runs
+
+[cols="1,3"]
+|===
+|Service |What it is
+
+|`keycloak`, `realm-setup`
+|Keycloak with intaka's phone authenticator, and the `demo` realm with its clients and phone flows (web, passkey, mobile, token panel, and the `demo-backend` admin client)
+
+|`kuloffice`, `bootstrap`
+|kuloffice, built from your checkout. `bootstrap` activates a license and registers Keycloak as the identity provider.
+
+|`web`
+|The KulPay web app
+
+|`token-panel`
+|intaka's token panel: signs phone numbers in and keeps their tokens fresh
+
+|`sms-inbox`
+|intaka's demo backend. Where every SMS goes - Keycloak's codes and kuloffice's messages, so nothing reaches a real phone - and the demo page and API for intaka's demo app (`demo/run-android.sh`, `demo/run-ios.sh` there). This is the local stack intaka's demo used to bring up itself.
+
+|`minio`, `minio-init`, `fileserver`
+|MinIO with the `test` and `kyc-pending` buckets (pending images expire after a day), behind the boquisso file server
+
+|`db`
+|PostgreSQL 17, with kuloffice's and Keycloak's databases
+|===
+
+MiniAiLive and BLNK are not part of the stack: kuloffice uses their hosted
+instances. Approving a KYC therefore creates a real identity on the hosted
+BLNK. Set `BIOMETRICS_ENABLED=false` in `stack.env` to skip MiniAiLive and
+send every submission to a reviewer.
 
 == Prerequisites
 
-* Docker
-* Docker Compose
-* Make (optional, but recommended)
+* Docker with Compose v2, and Make
+* `openssl` (for the license key pair)
+* Sibling checkouts of the repositories the images are built from:
++
+[source]
+----
+kuloffice/                      github.com/pavulla-tech/kuloffice
+keycloak-phone-authenticator/   github.com/pavulla-tech/intaka
+kulpay-web/                     github.com/pavulla-tech/kulpay-webapp
+boquisso-fileserver/            github.com/pavulla-tech/boquisso-fileserver
+kuloffice-demo/                 this repository
+----
++
+Other locations go in `stack.env` (`KULOFFICE_DIR`, `INTAKA_DIR`, `WEB_DIR`,
+`FILESERVER_DIR`). Each image is built from whatever branch its checkout has
+checked out.
 
-== Quick Start
+== Quick start
 
-=== Clone the repository:
 [source,bash]
 ----
-git clone https://github.com/pavulla-tech/kuloffice-demo.git
-cd kuloffice-demo
+make up
 ----
 
-=== Set up the environment:
-[source,bash]
-----
-make setup
-----
+The first run creates `stack.env`, generates the license key pair in
+`.stack/keys`, builds every image, and configures the realm, buckets, license
+and identity provider. It finishes by printing the URLs:
 
-=== Configure your `.env` file with appropriate values:
-[source,properties]
-----
-POSTGRES_USER=kuloffice
-POSTGRES_PASSWORD=your_secure_password
-POSTGRES_DB=kuloffice
-POSTGRES_PORT=5432
-KULOFFICE_DATABASE_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@kuloffice-db:5432/${POSTGRES_DB}
-KULOFFICE_LICENSE_KEY=your_license_key
-KULOFFICE_BOOTSTRAP_API_BASE_URL=http://localhost:8080
-KULOFFICE_BOOTSTRAP_SYSTEM_USER=true
-KULOFFICE_BOOTSTRAP_SYSTEM_USER_USERNAME=system
-KULOFFICE_BOOTSTRAP_SYSTEM_USER_PASSWORD=system
-KULOFFICE_BOOTSTRAP_SYSTEM_USER_EMAIL=system@example.com
-KULOFFICE_BOOTSTRAP_SYSTEM_USER_FIRST_NAME=System
-KULOFFICE_BOOTSTRAP_SYSTEM_USER_LAST_NAME=User
-KULOFFICE_BOOTSTRAP_IDP=true
-KULOFFICE_BOOTSTRAP_IDP_NAME=Google
-KULOFFICE_BOOTSTRAP_IDP_TYPE=oidc
-KULOFFICE_BOOTSTRAP_IDP_DISCOVERY_URL=https://accounts.google.com/.well-known/openid-configuration
-KULOFFICE_BOOTSTRAP_IDP_CLIENT_ID=your_client_id
-KULOFFICE_BOOTSTRAP_IDP_CLIENT_SECRET=your_client_secret
-KULOFFICE_BOOTSTRAP_IDP_ISSUER_URL=https://accounts.google.com
-KULOFFICE_LICENSE_KEY=your_license_key
-----
-
-=== Start the application:
-[source,bash]
-----
-make start
-----
-
-== Available Make Commands
-
-[cols="1,2"]
+[cols="1,2,2"]
 |===
-|Command |Description
+|What |URL |Credentials
 
-|`make help`
-|Display available commands
-
-|`make setup`
-|Create .env file from .env.example
-
-|`make start`
-|Start all containers
-
-|`make stop`
-|Stop all containers
-
-|`make restart`
-|Restart all containers
-
-|`make logs`
-|View container logs
-
-|`make clean`
-|Remove all containers and volumes
-
-|`make rebuild`
-|Rebuild and restart all containers
+|Web app |http://localhost:3000 |a phone number; the code is in the SMS inbox
+|Token panel |http://localhost:8765 |the same
+|kuloffice API |http://localhost:18080 |`admin@kulpay.local` / `localadmin` (HTTP Basic, system routes)
+|Keycloak |http://localhost:8080/auth/admin |`admin` / `admin`
+|SMS inbox |http://localhost:8090/api/dev/inbox |
+|intaka demo page |http://localhost:8090 |a phone number; the code is in the SMS inbox
+|MinIO console |http://localhost:9001 |`kulstack` / `kulstack-local`
+|File server |http://localhost:8082 |
+|PostgreSQL |localhost:5432 |`kuloffice` / `kuloffice`
 |===
 
-== Project Structure
+Every step is skipped when already done, so `make up` is also how to apply a
+change: it rebuilds what changed and restarts it.
+
+== Make targets
+
+[cols="1,3"]
+|===
+|`make up` |Build, start and configure everything
+|`make down` |Stop the stack (data is kept)
+|`make rebuild [S=service]` |Rebuild from the checkouts and restart
+|`make restart [S=service]` |Restart
+|`make logs [S=service]` |Follow logs
+|`make ps` / `make urls` |What is running / where to find it
+|`make sms` |Print the SMS inbox
+|`make reviewer` |Re-seed the demo reviewer (operator, identity, role)
+|`make review ACCOUNT=acc_...` |Decide an account's KYC as the demo reviewer (`OUTCOME=approve\|reject\|request_documents`, `MESSAGE=`, `DOCS=`)
+|`make kuloffice` |Recreate kuloffice with `stack.kuloffice.env` (MiniAiLive etc.)
+|`make ussd-test` |Drive intaka's USSD channel end to end against this Keycloak
+|`make psql` |psql into kuloffice's database
+|`make bootstrap` / `make realm` / `make buckets` |Re-run one configuration step
+|`make license` |Print a new license key signed with the stack's key
+|`make clean` |Remove the containers and volumes (keys and `stack.env` stay)
+|`make legacy-stop` |Stop the older `demo` + `kuloffice-demo` containers, which use the same ports
+|===
+
+== How it fits together
+
+A token's issuer is `http://localhost:8080/auth/realms/demo`. kuloffice and
+the web app fetch that URL from inside their containers. So Keycloak,
+kuloffice, the web app and the token panel all share the network namespace of
+a container named `net`, which publishes their ports. For them, `localhost`
+is the same place as it is for your browser.
+
+As a result, each of these services listens inside on the same port it is
+published on. To move a port, change it in `stack.env`; nothing else needs to
+change, not even the issuer. That also lets a second copy run beside another
+stack: give it a different `STACK_NAME` and different ports.
+
+Ports are published on `127.0.0.1` (`STACK_BIND`). The token panel holds live
+tokens and is always on loopback only.
+
+== Files
 
 [source]
 ----
-.
-├── docker-compose.yml    # Docker compose configuration
-├── Makefile             # Make commands for easy management
-├── .env.example         # Example environment variables
-└── README.adoc          # This file
+docker-compose.yml     the stack
+stack.env.example      settings, copied to stack.env on first run
+stack/bootstrap.sh     license activation and IdP registration
+stack/token-panel.py   runs intaka's token panel in a container
+stack/seed_reviewer.py makes the workforce realm's demo user a kuloffice reviewer
+stack/review.py        decides a KYC review as that reviewer (make review)
+stack/postgres/        creates Keycloak's database
+.stack/keys/           license key pair (generated, gitignored)
 ----
 
-== Configuration
-
-=== Environment Variables
-
-[cols="1,1,2"]
-|===
-|Variable |Default |Description
-
-|POSTGRES_USER
-|kuloffice
-|PostgreSQL database user
-
-|POSTGRES_PASSWORD
-|kuloffice
-|PostgreSQL database password
-
-|POSTGRES_DB
-|kuloffice
-|PostgreSQL database name
-
-|POSTGRES_PORT
-|5432
-|PostgreSQL port mapping
-
-|KULOFFICE_DATABASE_URL
-|-
-|Full database connection URL
-|===
-
-|KULOFFICE_LICENSE_KEY
-|your_license_key
-|License key for KulOffice
-
-|KULOFFICE_BOOTSTRAP_API_BASE_URL
-|http://localhost:8080
-|Base URL for the KulOffice Bootstrap API
-
-
-== Contributing
-
-1. Fork the repository
-2. Create your feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add some amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
-
-== License
-
-This project is licensed under the MIT License - see the LICENSE file for details. 
+`docker-compose.override.yml`, if you have one, belongs to the older setup.
+The Makefile names `docker-compose.yml` explicitly, so it is never merged in.
