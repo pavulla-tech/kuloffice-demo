@@ -1,2 +1,5 @@
 .env
+stack.env
+.stack/
+stack.kuloffice.env
 pictures
