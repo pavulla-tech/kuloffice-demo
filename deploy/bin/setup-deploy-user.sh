@@ -22,6 +22,18 @@ deploy_dir=$(cd "$(dirname "$0")/.." && pwd)
 repo=$(cd "$deploy_dir/.." && pwd)
 owner=$(stat -c %U "$repo")
 
+# Docker's group: the docker-ce package creates it; snap or hand installs may
+# not. The socket is handed to it now, with no daemon restart (that would stop
+# every container on the server); Docker does the same itself on its next
+# start, once the group exists.
+getent group docker > /dev/null || { groupadd --system docker; echo "created the docker group"; }
+sock=$(docker context inspect -f '{{.Endpoints.docker.Host}}' 2> /dev/null | sed 's|^unix://||')
+[ -S "${sock:-}" ] || sock=/var/run/docker.sock
+if [ -S "$sock" ] && [ "$(stat -c %G "$sock")" != docker ]; then
+  chgrp docker "$sock" && chmod 660 "$sock"
+  echo "gave the docker group access to $sock"
+fi
+
 getent group "$group" > /dev/null || groupadd "$group"
 id "$user" > /dev/null 2>&1 || useradd -m -s /bin/bash "$user"
 usermod -aG docker,"$group" "$user"
