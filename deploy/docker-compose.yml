@@ -10,6 +10,11 @@
 # The server never builds: every image is built on a laptop and pulled from
 # Docker Hub (make images / make push there, make update here).
 
+# The project's own name, not its folder's: the Keycloak kit this replaces
+# also lives in a folder called deploy, and sharing a project name would let
+# `make stop` or `make clean` here remove its containers and volumes.
+name: kulpay
+
 x-restart: &restart
   restart: unless-stopped
   networks: [kulpay]
@@ -23,8 +28,8 @@ networks:
     # by address: it reaches them through this network's gateway.
     ipam:
       config:
-        - subnet: ${STACK_SUBNET:-172.30.0.0/24}
-          gateway: ${STACK_GATEWAY:-172.30.0.1}
+        - subnet: ${STACK_SUBNET:-10.250.0.0/24}
+          gateway: ${STACK_GATEWAY:-10.250.0.1}
 
 volumes:
   db-data:
@@ -265,7 +270,7 @@ services:
       SOLANGE_BEHIND_CLOUDFLARE: ${SOLANGE_BEHIND_CLOUDFLARE:-false}
       # Apache reaches the container through the network's gateway; only its
       # forwarded headers are believed.
-      SOLANGE_TRUSTED_PROXIES: ${STACK_GATEWAY:-172.30.0.1}
+      SOLANGE_TRUSTED_PROXIES: ${STACK_GATEWAY:-10.250.0.1}
       # Empty: places come from Cloudflare alone (see .env).
       SOLANGE_GEOIP_DB: ${SOLANGE_GEOIP_DB:-}
       SOLANGE_MAXMIND_ACCOUNT_ID: ${SOLANGE_MAXMIND_ACCOUNT_ID:-}
