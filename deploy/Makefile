@@ -68,7 +68,7 @@ config: check-images
 	$(COMPOSE) config --quiet && echo "configuration is complete"
 
 check-images:
-	@sh scripts/check-image-refs.sh "$(ENV_FILE)" $(IMAGES)
+	@sh scripts/check-image-refs.sh "$(ENV_FILE)" $(IMAGES) MINIO MC
 
 # ── images (laptop) ───────────────────────────────────────────────────────────
 
