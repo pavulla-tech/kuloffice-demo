@@ -3,8 +3,9 @@
 #
 #   sudo sh bin/setup-deploy-user.sh [user]      (default: kulpay-deploy)
 #
-# - The user, in the docker group, with a long random password (printed once:
-#   put it in GitHub as DEPLOY_PASSWORD).
+# - The user, in the docker group, with the password you type (the one in
+#   GitHub's DEPLOY_PASSWORD), or a long random one if you just press Enter
+#   (printed once: put it in DEPLOY_PASSWORD).
 # - A group shared with whoever owns this checkout, so both can run make and
 #   the deploy tool on the same files (.env becomes group-readable: 660).
 # - sshd: password login for that user only, forced to bin/kulpay-ssh, with no
@@ -12,7 +13,7 @@
 #   command is what keeps the password from being more than a deploy button.
 # - fail2ban, if it isn't there.
 #
-# Safe to run again: it resets the password and rewrites the sshd snippet.
+# Safe to run again: it sets the password again and rewrites the sshd snippet.
 set -eu
 [ "$(id -u)" = 0 ] || { echo "run as root (sudo)" >&2; exit 1; }
 user=${1:-kulpay-deploy}
@@ -34,7 +35,12 @@ for f in .env kuloffice.env kulportal.env; do [ ! -f "$deploy_dir/$f" ] || chmod
 git -C "$repo" config core.sharedRepository group
 su - "$user" -c "git config --global --add safe.directory '$repo'"
 
-password=$(head -c 32 /dev/urandom | base64 | tr -d '=+/' | cut -c1-40)
+printf 'Password for %s (the DEPLOY_PASSWORD secret; Enter to generate one): ' "$user"
+stty -echo 2> /dev/null || true; read -r password || true; stty echo 2> /dev/null || true; echo
+generated=no
+if [ -z "$password" ]; then
+  password=$(head -c 32 /dev/urandom | base64 | tr -d '=+/' | cut -c1-40); generated=yes
+fi
 echo "$user:$password" | chpasswd
 
 cat > /etc/ssh/sshd_config.d/kulpay-deploy.conf << EOF
@@ -65,16 +71,17 @@ if ! command -v fail2ban-client > /dev/null; then
   fi
 fi
 
-host_key=$(ssh-keyscan -t ed25519 localhost 2> /dev/null | awk '{ print $2, $3 }')
-cat << EOF
+host_key=$(cut -d' ' -f1,2 /etc/ssh/ssh_host_ed25519_key.pub)
+echo
+echo "Done. GitHub's organisation secrets (CICD.md):"
+echo "  DEPLOY_USER          $user"
+if [ "$generated" = yes ]; then
+  echo "  DEPLOY_PASSWORD      $password"
+  echo "                       (not shown again; run this script again for another)"
+else
+  echo "  DEPLOY_PASSWORD      the one you typed"
+fi
+echo "  DEPLOY_KNOWN_HOSTS   <DEPLOY_HOST> $host_key"
+echo "                       (with DEPLOY_HOST's exact value in front)"
+echo "Check: GitHub → kuloffice-demo → Actions → Server → status"
 
-Done. In GitHub (organisation secrets, or each repository's):
-  DEPLOY_HOST          this server's address
-  DEPLOY_USER          $user
-  DEPLOY_PASSWORD      $password
-  DEPLOY_KNOWN_HOSTS   <address> $host_key
-                       (the line, with this server's address in front)
-
-The password is not shown again; run this script again for a new one.
-Check: ssh $user@<address> status
-EOF

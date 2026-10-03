@@ -108,8 +108,8 @@ stdin, so it stays out of your shell history):
 
 ```bash
 R=kuloffice,kuloffice-demo,kulpay-webapp,intaka,solange,boquisso-fileserver
-gh secret set DOCKERHUB_USERNAME --org pavulla-tech --visibility selected --repos $R
-gh secret set DOCKERHUB_TOKEN    --org pavulla-tech --visibility selected --repos $R
+gh secret set KULPAY_DOCKERHUB_USERNAME --org pavulla-tech --visibility selected --repos $R
+gh secret set KULPAY_DOCKERHUB_TOKEN    --org pavulla-tech --visibility selected --repos $R
 gh secret set DEPLOY_HOST        --org pavulla-tech --visibility selected --repos $R
 gh secret set DEPLOY_PASSWORD    --org pavulla-tech --visibility selected --repos $R
 gh secret set DEPLOY_KNOWN_HOSTS --org pavulla-tech --visibility selected --repos $R
@@ -125,8 +125,8 @@ list, or the web).
 
 | Secret | Value | Used by |
 |---|---|---|
-| `DOCKERHUB_USERNAME` | the Docker Hub account that owns `developerspavs` | service repositories (build) |
-| `DOCKERHUB_TOKEN` | a Docker Hub personal access token with **Read & Write** on `developerspavs/*` | service repositories (build) |
+| `KULPAY_DOCKERHUB_USERNAME` | the Docker Hub account that owns `developerspavs` | service repositories (build) |
+| `KULPAY_DOCKERHUB_TOKEN` | a Docker Hub personal access token with **Read & Write** on `developerspavs/*` | service repositories (build) |
 | `DEPLOY_HOST` | the server's address (IP or hostname) | all six |
 | `DEPLOY_USER` | `kulpay-deploy` (already set) | all six |
 | `DEPLOY_PASSWORD` | the password `setup-deploy-user.sh` printed | all six |
@@ -137,18 +137,18 @@ Which repository needs which:
 
 | Repository | Needs |
 |---|---|
-| kuloffice, intaka, solange, kulpay-webapp, boquisso-fileserver | `DOCKERHUB_USERNAME`, `DOCKERHUB_TOKEN`, `DEPLOY_HOST`, `DEPLOY_USER`, `DEPLOY_PASSWORD`, `DEPLOY_KNOWN_HOSTS` (+ `DEPLOY_PORT`) |
+| kuloffice, intaka, solange, kulpay-webapp, boquisso-fileserver | `KULPAY_DOCKERHUB_USERNAME`, `KULPAY_DOCKERHUB_TOKEN`, `DEPLOY_HOST`, `DEPLOY_USER`, `DEPLOY_PASSWORD`, `DEPLOY_KNOWN_HOSTS` (+ `DEPLOY_PORT`) |
 | kuloffice-demo (Rollback, Server workflows) | `DEPLOY_HOST`, `DEPLOY_USER`, `DEPLOY_PASSWORD`, `DEPLOY_KNOWN_HOSTS` (+ `DEPLOY_PORT`) |
 
 Notes:
 - **Callers' secrets.** The build and deploy run in the service repository's
   context (`secrets: inherit`), with that repository's secrets.
   kuloffice-demo never needs the Docker Hub token.
-- **Repository secrets win over organisation secrets of the same name.**
-  kuloffice already has repository-level `DOCKERHUB_USERNAME` and
-  `DOCKERHUB_TOKEN` (and `SERVER_*`), from its older workflow. Make sure those
-  can push to `developerspavs/*`, or delete them so the organisation's apply.
-  `SERVER_*` and Solange's `VPS_*` are not used by these pipelines.
+- **Why `KULPAY_` on the Docker Hub ones:** a repository secret wins over an
+  organisation secret of the same name. kuloffice keeps repository-level
+  `DOCKERHUB_USERNAME`/`DOCKERHUB_TOKEN` for the `pavulla` Docker Hub account
+  (its older goreleaser workflow on `main`), which would shadow the org's.
+  Its `SERVER_*` and Solange's `VPS_*` are not used by these pipelines.
 - **No license secret is needed.** kuloffice's license public key is in this
   repository (`deploy/keys/kuloffice-license.pub.base64`). It is public by
   nature, and the same key the server's license was signed for.

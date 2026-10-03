@@ -9,9 +9,11 @@
 #       with: { unit: web }
 #       secrets: inherit
 #
-# Secrets (organisation or repository): DOCKERHUB_USERNAME, DOCKERHUB_TOKEN,
-# DEPLOY_HOST, DEPLOY_USER, DEPLOY_PASSWORD, and DEPLOY_KNOWN_HOSTS (optional,
-# recommended); DEPLOY_PORT if SSH isn't on 22.
+# Secrets (organisation-level; see CICD.md): KULPAY_DOCKERHUB_USERNAME,
+# KULPAY_DOCKERHUB_TOKEN, DEPLOY_HOST, DEPLOY_USER, DEPLOY_PASSWORD,
+# DEPLOY_KNOWN_HOSTS (optional, recommended), DEPLOY_PORT if SSH isn't on 22.
+# The Docker Hub ones have their own names: kuloffice keeps repository-level
+# DOCKERHUB_* for another account, and those would win over the org's.
 name: KulPay service
 
 on:
@@ -53,8 +55,8 @@ jobs:
           path: kit
       - uses: docker/login-action@v3
         with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
+          username: ${{ secrets.KULPAY_DOCKERHUB_USERNAME }}
+          password: ${{ secrets.KULPAY_DOCKERHUB_TOKEN }}
       - name: Build and push
         run: kit/deploy/ci/build.sh "${{ inputs.unit }}" "$GITHUB_REF_NAME" src --push
 
