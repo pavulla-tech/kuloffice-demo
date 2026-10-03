@@ -99,17 +99,36 @@ counts as failed. Nobody else is emailed, so look at the Actions tab, or run
 
 ## Secrets
 
-Set these as **organisation secrets** in `pavulla-tech` (Settings → Secrets
-and variables → Actions), available to the six repositories below. On GitHub
-Free, organisation secrets may only reach public repositories. If the
-private ones can't see them, add the same secrets to each repository instead.
+All of them are **organisation secrets** in `pavulla-tech`, shared with the
+six repositories below only ("selected repositories", not all 177). Verified
+on the org's Free plan: the private repositories see them too.
+
+Set or change one from a terminal (an org admin; the value is read from
+stdin, so it stays out of your shell history):
+
+```bash
+R=kuloffice,kuloffice-demo,kulpay-webapp,intaka,solange,boquisso-fileserver
+gh secret set DOCKERHUB_USERNAME --org pavulla-tech --visibility selected --repos $R
+gh secret set DOCKERHUB_TOKEN    --org pavulla-tech --visibility selected --repos $R
+gh secret set DEPLOY_HOST        --org pavulla-tech --visibility selected --repos $R
+gh secret set DEPLOY_PASSWORD    --org pavulla-tech --visibility selected --repos $R
+gh secret set DEPLOY_KNOWN_HOSTS --org pavulla-tech --visibility selected --repos $R
+```
+
+Each command prompts for the value. Or use the web: Organisation Settings →
+Secrets and variables → Actions → New organization secret, with Repository
+access set to the six repositories. A new repository joining the pipeline
+must be added to each secret's list (`gh secret set … --repos` with the new
+list, or the web).
+
+`DEPLOY_USER` is already set (`kulpay-deploy`).
 
 | Secret | Value | Used by |
 |---|---|---|
 | `DOCKERHUB_USERNAME` | the Docker Hub account that owns `developerspavs` | service repositories (build) |
 | `DOCKERHUB_TOKEN` | a Docker Hub personal access token with **Read & Write** on `developerspavs/*` | service repositories (build) |
 | `DEPLOY_HOST` | the server's address (IP or hostname) | all six |
-| `DEPLOY_USER` | `kulpay-deploy` (printed by `setup-deploy-user.sh`) | all six |
+| `DEPLOY_USER` | `kulpay-deploy` (already set) | all six |
 | `DEPLOY_PASSWORD` | the password `setup-deploy-user.sh` printed | all six |
 | `DEPLOY_KNOWN_HOSTS` | the server's host-key line `setup-deploy-user.sh` printed, with the address in front: `<address> ssh-ed25519 AAAA…` | all six (optional, strongly recommended) |
 | `DEPLOY_PORT` | SSH port, only if it isn't 22 | all six (optional) |

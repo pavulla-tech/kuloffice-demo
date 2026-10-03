@@ -235,8 +235,8 @@ first entry, so a rollback can return to it.
    only to run `bin/kulpay-ssh` (no shell, no forwarding), shares this
    checkout with it through a `kulpay` group, and installs fail2ban. It
    prints the secrets below.
-2. **Secrets** in GitHub, for the organisation (or each repository plus
-   kuloffice-demo): `DOCKERHUB_USERNAME`, `DOCKERHUB_TOKEN` (a Docker Hub
+2. **Secrets** in GitHub, organisation-level, shared with the six
+   repositories (commands in [../CICD.md](../CICD.md)): `DOCKERHUB_USERNAME`, `DOCKERHUB_TOKEN` (a Docker Hub
    access token that can push to `developerspavs/*`), `DEPLOY_HOST`,
    `DEPLOY_USER`, `DEPLOY_PASSWORD`, `DEPLOY_KNOWN_HOSTS`, and `DEPLOY_PORT`
    if SSH isn't on 22.
