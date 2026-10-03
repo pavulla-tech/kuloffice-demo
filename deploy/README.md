@@ -159,7 +159,8 @@ points here.
 ## Releases (CI)
 
 Each service repository releases itself: push a tag, and GitHub Actions tests,
-builds, pushes to Docker Hub and deploys on this server.
+builds, pushes to Docker Hub and deploys on this server. The full guide,
+including every secret the repositories need: [../CICD.md](../CICD.md).
 
 ```bash
 git tag v0.1.0-alpha03 && git push origin v0.1.0-alpha03
