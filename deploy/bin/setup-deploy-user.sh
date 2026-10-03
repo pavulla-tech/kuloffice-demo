@@ -76,7 +76,10 @@ systemctl reload ssh 2> /dev/null || systemctl reload sshd
 
 if ! command -v fail2ban-client > /dev/null; then
   if command -v apt-get > /dev/null; then
-    apt-get install -y -q fail2ban > /dev/null && systemctl enable --now fail2ban > /dev/null 2>&1 || true
+    # Non-interactive: needrestart's "restart which services?" would wait,
+    # unseen, behind the redirect.
+    DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=l NEEDRESTART_SUSPEND=1 \
+      apt-get install -y -q fail2ban > /dev/null && systemctl enable --now fail2ban > /dev/null 2>&1 || true
     echo "fail2ban installed (its sshd jail is on by default)"
   else
     echo "warning: install fail2ban yourself" >&2
