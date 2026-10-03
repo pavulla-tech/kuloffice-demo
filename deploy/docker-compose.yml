@@ -137,12 +137,13 @@ services:
       KYC_BUCKET: ${KYC_BUCKET:-kyc}
       PENDING_BUCKET: ${PENDING_BUCKET:-kyc-pending}
       PENDING_EXPIRY_DAYS: ${PENDING_EXPIRY_DAYS:-1}
+      LOGO_BUCKET: ${LOGO_BUCKET:-logos}
     entrypoint:
       - sh
       - -ec
       - |
         mc alias set local http://minio:9000 "$$MINIO_ROOT_USER" "$$MINIO_ROOT_PASSWORD" >/dev/null
-        mc mb --ignore-existing "local/$$KYC_BUCKET" "local/$$PENDING_BUCKET"
+        mc mb --ignore-existing "local/$$KYC_BUCKET" "local/$$PENDING_BUCKET" "local/$$LOGO_BUCKET"
         if mc ilm rule ls "local/$$PENDING_BUCKET" 2>/dev/null | grep -q Expir; then
           echo "lifecycle rule on $$PENDING_BUCKET already set"
         else
@@ -205,6 +206,18 @@ services:
       # and wallet.
       KULOFFICE_OPERATOR_REVIEW_SYNC: "true"
       KULOFFICE_BIOMETRICS_ENABLED: ${BIOMETRICS_ENABLED:-true}
+      # QR codes through Solange. Off until the key is set: `make solange-kulpay`
+      # issues it (and the webhook secret) into .env.
+      KULOFFICE_SOLANGE_BASE_URL: http://solange:8090
+      KULOFFICE_SOLANGE_API_KEY: ${KULOFFICE_SOLANGE_API_KEY:-}
+      KULOFFICE_SOLANGE_WEBHOOK_SECRETS: ${KULOFFICE_SOLANGE_WEBHOOK_SECRETS:-}
+      KULOFFICE_SOLANGE_WEB_URL: ${WEB_PUBLIC_URL}
+      KULOFFICE_SOLANGE_PUBLIC_API_URL: ${KULOFFICE_PUBLIC_URL}
+      KULOFFICE_SOLANGE_LOGO_BUCKET: ${LOGO_BUCKET:-logos}
+      KULOFFICE_SOLANGE_PERSONAL_PAYMENT_REQUESTS: ${PERSONAL_PAYMENT_REQUESTS:-false}
+      # The public lookup believes forwarded addresses from Apache (the
+      # gateway) and the web app (the stack's network) only.
+      KULOFFICE_SOLANGE_TRUSTED_PROXIES: ${STACK_GATEWAY:-10.250.0.1},${STACK_SUBNET:-10.250.0.0/24}
     ports:
       - "127.0.0.1:${KULOFFICE_PORT:-9280}:8080"
 
@@ -260,6 +273,10 @@ services:
     depends_on:
       solange-migrate: { condition: service_completed_successfully }
     command: ["serve"]
+    # Live webhooks must be https: Solange posts to kuloffice's public URL,
+    # and this sends that hostname straight to the host's Apache.
+    extra_hosts:
+      - "${KULOFFICE_PUBLIC_HOST:-core.kulpay.pavulla.com}:${STACK_GATEWAY:-10.250.0.1}"
     environment:
       SOLANGE_DATABASE_URL: *solange-db
       SOLANGE_LISTEN: ":8090"

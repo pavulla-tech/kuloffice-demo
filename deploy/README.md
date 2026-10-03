@@ -114,12 +114,30 @@ make operator EMAIL=eva@pavulla.com FIRST=Eva LAST=Sitoe ROLE= SOLANGE=viewer # 
   operator bound to the account, holding that role.
 - **`SOLANGE`:** console roles, any of `viewer`, `developer`, `admin`.
 
-**6. Solange's app for KulPay** (once Solange has staff):
+**6. QR codes** (kuloffice through Solange):
 
 ```bash
-docker compose exec solange solange app create -slug kulpay-app -name "KulPay" -prefix k
-docker compose exec solange solange key create -app kulpay-app -mode live -name kuloffice
+make solange-kulpay
 ```
+
+Creates KulPay's app in Solange (`kulpay-app`; printed codes are
+`https://qr.kulpay.pavulla.com/k/<code>`), kuloffice's key and the webhook to
+`https://core.kulpay.pavulla.com/v1/integrations/solange/events`. Each step is
+skipped when it's already done. The key and the webhook secret are written into
+`.env` without being printed, and kuloffice is recreated with QR codes on.
+
+Run it again any time; to issue a new key, clear `KULOFFICE_SOLANGE_API_KEY`
+first. Solange posts webhooks to `core.` over HTTPS through the host's Apache
+(the `solange` service resolves that name to the stack's gateway). Check the
+path with:
+
+```bash
+docker compose exec solange wget -qO- https://core.kulpay.pavulla.com/v1/system/status
+```
+
+For the KulPay app to open scanned codes itself, put the mobile team's
+`assetlinks.json` and `apple-app-site-association` in `/srv/kulpay/well-known/`
+(see `apache/solange.conf`).
 
 ## Moving over from the old stacks
 

@@ -6,7 +6,7 @@
 .PHONY: help setup sync-env clean-env-backups config check-images \
         images push theme license \
         start start-portal stop restart logs ps update clean \
-        init operator
+        init operator solange-kulpay
 
 ENV_FILE ?= .env
 ENV_EXAMPLE ?= .env.example
@@ -44,6 +44,7 @@ help:
 	@echo "  make init               realms, clients, kuloffice license and identity providers"
 	@echo "  make operator EMAIL=… FIRST=… LAST=… [ROLE=Revisores] [SOLANGE=viewer,developer]"
 	@echo "                          a staff account; ROLE= (empty) for Solange only"
+	@echo "  make solange-kulpay     KulPay's app in Solange, kuloffice's key and webhook (into .env)"
 
 # ── setup ─────────────────────────────────────────────────────────────────────
 
@@ -163,3 +164,9 @@ operator:
 	@[ -n "$(EMAIL)" ] || { echo "usage: make operator EMAIL=… FIRST=… LAST=… [ROLE=Revisores] [SOLANGE=viewer]" >&2; exit 1; }
 	$(COMPOSE) --profile tools run --rm -e STAFF_EMAIL="$(EMAIL)" -e STAFF_FIRST_NAME="$(FIRST)" -e STAFF_LAST_NAME="$(LAST)" \
 		-e KULOFFICE_ROLE="$(ROLE)" -e SOLANGE_ROLES="$(SOLANGE)" tools /tools/operator.sh
+
+# KulPay's app in Solange, kuloffice's key and the webhook to kuloffice, each
+# step only if missing; the secrets go straight into .env, then kuloffice is
+# recreated to read them.
+solange-kulpay:
+	@ENV_FILE=$(ENV_FILE) COMPOSE="$(COMPOSE)" sh scripts/solange-kulpay.sh
