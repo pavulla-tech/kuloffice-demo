@@ -1,0 +1,42 @@
+name: KulPay server
+description: >
+  Runs a bin/kulpay command on the KulPay server as the deploy user (password
+  login, forced to bin/kulpay-ssh: deploy, rollback, releases, status, health).
+inputs:
+  command:
+    description: The command, e.g. "deploy web v0.1.0-alpha02 --actor octocat"
+    required: true
+  host:
+    required: true
+  port:
+    default: "22"
+  user:
+    required: true
+  password:
+    required: true
+  known-hosts:
+    description: The server's known_hosts line (DEPLOY_KNOWN_HOSTS). Without it the host key is not checked.
+    default: ""
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env:
+        SSHPASS: ${{ inputs.password }}
+        HOST: ${{ inputs.host }}
+        PORT: ${{ inputs.port }}
+        LOGIN: ${{ inputs.user }}
+        KNOWN: ${{ inputs.known-hosts }}
+        COMMAND: ${{ inputs.command }}
+      run: |
+        command -v sshpass > /dev/null || { sudo apt-get update -qq && sudo apt-get install -y -qq sshpass > /dev/null; }
+        opts=(-T -p "$PORT" -o PubkeyAuthentication=no -o PreferredAuthentications=password
+              -o ConnectTimeout=20 -o ServerAliveInterval=30 -o ServerAliveCountMax=10)
+        if [ -n "$KNOWN" ]; then
+          mkdir -p ~/.ssh && printf '%s\n' "$KNOWN" >> ~/.ssh/known_hosts
+          opts+=(-o StrictHostKeyChecking=yes)
+        else
+          echo "::warning::DEPLOY_KNOWN_HOSTS is not set, so the server's identity is not checked"
+          opts+=(-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null)
+        fi
+        sshpass -e ssh "${opts[@]}" "$LOGIN@$HOST" "$COMMAND"

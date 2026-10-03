@@ -1,0 +1,64 @@
+# Rolls a unit back on the KulPay server: one release back by default, more
+# with "steps", or to an exact tag from its history ("to"; see the Server
+# workflow's releases). Within a version only the image changes. Across a
+# reset (an earlier patch) the data that reset wiped is restored, for every
+# unit it wiped, and what they stored since is lost: the run stops and says
+# so unless "confirm" is ticked. Never below the current minor.
+name: Rollback
+
+on:
+  workflow_dispatch:
+    inputs:
+      unit:
+        type: choice
+        options: [kuloffice, web, keycloak, solange, fileserver, kulportal]
+      steps:
+        description: How many releases back (ignored when "to" is set)
+        default: "1"
+      to:
+        description: Or an exact tag, e.g. v0.1.0-alpha03
+        default: ""
+      confirm:
+        description: Allow restoring data (needed when the rollback crosses a reset)
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: kulpay-server
+  cancel-in-progress: false
+
+jobs:
+  rollback:
+    name: Roll back ${{ inputs.unit }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Command
+        id: command
+        env:
+          UNIT: ${{ inputs.unit }}
+          STEPS: ${{ inputs.steps }}
+          TO: ${{ inputs.to }}
+          CONFIRM: ${{ inputs.confirm }}
+          ACTOR: ${{ github.actor }}
+        run: |
+          if [ -n "$TO" ]; then
+            echo "$TO" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$' || { echo "::error::'to' must be a tag"; exit 1; }
+            target="--to $TO"
+          else
+            echo "$STEPS" | grep -Eq '^[1-9][0-9]*$' || { echo "::error::'steps' must be a number"; exit 1; }
+            target="--steps $STEPS"
+          fi
+          yes=""; [ "$CONFIRM" = true ] && yes="--yes"
+          echo "line=rollback $UNIT $target $yes --actor $ACTOR" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/kulpay-server
+        with:
+          command: ${{ steps.command.outputs.line }}
+          host: ${{ secrets.DEPLOY_HOST }}
+          port: ${{ secrets.DEPLOY_PORT || '22' }}
+          user: ${{ secrets.DEPLOY_USER }}
+          password: ${{ secrets.DEPLOY_PASSWORD }}
+          known-hosts: ${{ secrets.DEPLOY_KNOWN_HOSTS }}

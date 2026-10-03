@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+# The deploy user's only command (sshd ForceCommand, set by
+# bin/setup-deploy-user.sh): CI's password can run bin/kulpay's commands and
+# nothing else, never a shell.
+#
+# Before a deploy or a rollback it brings this repository up to date, so the
+# compose file and the tool match what was merged. A local change on the
+# server makes that fail: the deploy then goes on with the kit as it is.
+set -euo pipefail
+deploy_dir=$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)
+cd "$deploy_dir"
+
+read -r -a args <<< "${SSH_ORIGINAL_COMMAND:-}"
+case ${args[0]:-} in
+  deploy | rollback | releases | status | health) ;;
+  *) echo "allowed: deploy <unit> <tag> | rollback <unit> [--steps N | --to TAG] [--yes] | releases [unit] | status | health [unit]" >&2; exit 2 ;;
+esac
+for arg in "${args[@]}"; do
+  [[ $arg =~ ^[A-Za-z0-9._@=+-]+$ ]] || { echo "refused argument: $arg" >&2; exit 2; }
+done
+
+case ${args[0]} in
+  deploy | rollback)
+    if git -C .. pull --ff-only -q 2> /dev/null; then
+      echo "kit: $(git -C .. log --oneline -1)"
+    else
+      echo "warning: could not update the kit (local changes?); deploying with $(git -C .. log --oneline -1)" >&2
+    fi
+    ;;
+esac
+exec "$deploy_dir/bin/kulpay" "${args[@]}"

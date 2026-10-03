@@ -1,0 +1,618 @@
+#!/usr/bin/env bash
+# Deploys and rolls back the stack's units (lib/units.sh) on this server.
+# CI runs it over SSH (bin/kulpay-ssh); the Makefile wraps it for people.
+#
+#   kulpay deploy   <unit> <tag>                 switch a unit to a tag
+#   kulpay rollback <unit> [--steps N | --to TAG] [--yes]
+#   kulpay releases [unit]                       what ran, newest last
+#   kulpay status                                each unit's current tag
+#   kulpay health   [unit]                       check running units
+#   kulpay backup   <database>                   a backup now
+#   kulpay restore  <database> <file> --yes      replace a database
+#
+# Options anywhere: --actor NAME (who asked; CI passes the GitHub user).
+#
+# Tags are vMAJOR.MINOR.PATCH-alphaNN. A new alpha updates in place: back up,
+# switch, health check, and back to the previous tag if the check fails. A new
+# patch or minor resets the unit: its data (and its dependents') is saved,
+# wiped and started fresh. Rolling back across a reset restores what it saved,
+# for every unit it wiped. Nothing rolls back below the current minor.
+set -euo pipefail
+umask 002
+
+DEPLOY_DIR=$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)
+cd "$DEPLOY_DIR"
+# shellcheck source=../lib/units.sh
+. lib/units.sh
+
+ENV_FILE=${ENV_FILE:-.env}
+export ENV_FILE
+STATE=state
+KEEP=${KEEP_BACKUPS:-5}
+ACTOR=${USER:-unknown}
+
+compose() { docker compose --env-file "$ENV_FILE" --profile portal "$@"; }
+say() { printf '%s  %s\n' "$(date '+%H:%M:%S')" "$*"; }
+die() { printf 'error: %s\n' "$*" >&2; exit 1; }
+
+# ── .env ─────────────────────────────────────────────────────────────────────
+
+env_get() { awk -v k="$1" 'index($0, k"=") == 1 { print substr($0, length(k) + 2); exit }' "$ENV_FILE"; }
+
+# KEY=value: replaced if present, appended otherwise. Written in place so the
+# file keeps its owner and mode.
+env_set() {
+  local tmp
+  tmp=$(mktemp)
+  awk -v k="$1" -v v="$2" 'index($0, k"=") == 1 { print k"="v; found = 1; next } { print }
+    END { if (!found) print k"="v }' "$ENV_FILE" > "$tmp"
+  cat "$tmp" > "$ENV_FILE"
+  rm -f "$tmp"
+}
+
+first_image() { set -- $(unit_images "$1"); echo "$1"; }
+unit_tag() { env_get "$(first_image "$1")_TAG"; }
+set_unit_tag() { local name; for name in $(unit_images "$1"); do env_set "${name}_TAG" "$2"; done; }
+
+# ── versions ─────────────────────────────────────────────────────────────────
+
+parse_version() {
+  [[ $1 =~ ^v([0-9]+)\.([0-9]+)\.([0-9]+)(-([0-9A-Za-z.]+))?$ ]] || return 1
+  V_MAJ=$((10#${BASH_REMATCH[1]})); V_MIN=$((10#${BASH_REMATCH[2]})); V_PAT=$((10#${BASH_REMATCH[3]}))
+  V_PRE=${BASH_REMATCH[5]}
+}
+is_version() { parse_version "$1"; }
+line_of() { parse_version "$1" && echo "$V_MAJ.$V_MIN"; }
+patch_of() { parse_version "$1" && echo "$V_MAJ.$V_MIN.$V_PAT"; }
+
+# -1, 0 or 1. Pre-releases sort before the release; alphaNN compares as text.
+version_cmp() {
+  local a b ap bp i
+  parse_version "$1"; a=("$V_MAJ" "$V_MIN" "$V_PAT"); ap=$V_PRE
+  parse_version "$2"; b=("$V_MAJ" "$V_MIN" "$V_PAT"); bp=$V_PRE
+  for i in 0 1 2; do
+    ((a[i] < b[i])) && { echo -1; return; }
+    ((a[i] > b[i])) && { echo 1; return; }
+  done
+  if [[ $ap == "$bp" ]]; then echo 0
+  elif [[ -z $ap ]]; then echo 1
+  elif [[ -z $bp ]]; then echo -1
+  elif [[ $ap < $bp ]]; then echo -1
+  else echo 1
+  fi
+}
+
+# ── history ──────────────────────────────────────────────────────────────────
+#
+# state/history/<unit>.tsv: time, tag, event (baseline, deploy, reset,
+# rollback), actor. state/releases.log: every attempt, with its result.
+
+hist_file() { echo "$STATE/history/$1.tsv"; }
+
+hist_add() {
+  mkdir -p "$STATE/history"
+  printf '%s\t%s\t%s\t%s\n' "$(date -u +%FT%TZ)" "$2" "$3" "$ACTOR" >> "$(hist_file "$1")"
+}
+
+# The first time a unit is touched, what runs now becomes its first entry.
+baseline() {
+  local cur
+  [[ -s $(hist_file "$1") ]] && return
+  cur=$(unit_tag "$1")
+  [[ -n $cur ]] && hist_add "$1" "$cur" baseline
+}
+
+# Deployed tags, oldest first, each at its latest deployment.
+hist_tags() {
+  [[ -f $(hist_file "$1") ]] || return 0
+  awk -F'\t' '$3 != "rollback" { print $2 }' "$(hist_file "$1")" |
+    awk '{ order[NR] = $0; last[$0] = NR } END { for (i = 1; i <= NR; i++) if (last[order[i]] == i) print order[i] }'
+}
+
+log_release() { # action unit from to result [note]
+  mkdir -p "$STATE"
+  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$(date -u +%FT%TZ)" "$2" "$1" "$3" "$4" "$ACTOR" "$5" "${6:-}" >> "$STATE/releases.log"
+}
+
+# ── locking ──────────────────────────────────────────────────────────────────
+
+# One deploy at a time; the others wait (CI runs from several repositories).
+lock() {
+  mkdir -p "$STATE"
+  exec 9> "$STATE/lock"
+  command -v flock > /dev/null || return 0
+  if ! flock -n 9; then
+    say "another deploy is running; waiting for it"
+    flock -w 1800 9 || die "the server has been busy for 30 minutes; try again later"
+  fi
+}
+
+# ── images ───────────────────────────────────────────────────────────────────
+
+pull_unit() { # unit tag: fails before anything changes
+  local name image
+  for name in $(unit_images "$1"); do
+    image=$(env_get "${name}_IMAGE")
+    say "pulling $image:$2"
+    docker pull -q "$image:$2" > /dev/null || die "$image:$2 is not on Docker Hub"
+  done
+}
+
+# Keeps the newest $KEEP tags of each image on disk (Docker Hub keeps them all).
+prune_images() {
+  local name image cur tag n=0
+  for name in $(unit_images "$1"); do
+    image=$(env_get "${name}_IMAGE"); cur=$(env_get "${name}_TAG"); n=0
+    while read -r tag; do
+      [[ $tag == "<none>" || $tag == "$cur" ]] && continue
+      n=$((n + 1))
+      ((n >= KEEP)) && docker image rm "$image:$tag" > /dev/null 2>&1 || true
+    done < <(docker image ls "$image" --format '{{.Tag}}')
+  done
+}
+
+# The login theme Keycloak mounts, copied out of the image it runs.
+theme_from_image() {
+  local image cid dir=$STATE/theme
+  image=$(env_get KEYCLOAK_IMAGE):$1
+  mkdir -p "$dir"; rm -rf "$dir/kulpay.new"
+  cid=$(docker create "$image")
+  if docker cp "$cid:/opt/keycloak/themes/kulpay" "$dir/kulpay.new" 2> /dev/null; then
+    chmod -R a+rX "$dir/kulpay.new"
+    rm -rf "$dir/kulpay.prev"
+    [[ -d $dir/kulpay ]] && mv "$dir/kulpay" "$dir/kulpay.prev"
+    mv "$dir/kulpay.new" "$dir/kulpay"
+    env_set KEYCLOAK_THEME_DIR ./state/theme/kulpay
+    say "login theme: from $image"
+  else
+    say "login theme: $image has none; keeping $(env_get KEYCLOAK_THEME_DIR || true)"
+  fi
+  docker rm "$cid" > /dev/null
+}
+
+switch_unit() { # unit tag: points .env at the tag (and the theme at its image)
+  [[ $1 == keycloak ]] && theme_from_image "$2"
+  set_unit_tag "$1" "$2"
+}
+
+# ── health ───────────────────────────────────────────────────────────────────
+
+container_of() { compose ps -aq "$1" 2> /dev/null | head -1; }
+
+# Running (healthy, where the service has a check) and not restarting.
+wait_service() {
+  local svc=$1 deadline=$((SECONDS + $2)) cid state health restarts again first=""
+  while ((SECONDS < deadline)); do
+    cid=$(container_of "$svc")
+    if [[ -n $cid ]]; then
+      read -r state health restarts < <(docker inspect -f \
+        '{{.State.Status}} {{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}} {{.RestartCount}}' "$cid" 2> /dev/null) ||
+        { sleep 3; continue; }
+      # Crash-looping (the restart policy hides the exit): three restarts.
+      [[ -n $first ]] || first=$restarts
+      ((restarts - first >= 3)) && break
+      if [[ $state == running && $health == healthy ]]; then return 0; fi
+      if [[ $state == running && $health == none ]]; then
+        sleep 15
+        read -r state again < <(docker inspect -f '{{.State.Status}} {{.RestartCount}}' "$cid" 2> /dev/null) || continue
+        [[ $state == running && $again == "$restarts" ]] && return 0
+      fi
+      if [[ $state == exited || $state == dead || $health == unhealthy ]]; then break; fi
+    fi
+    sleep 3
+  done
+  say "$svc is not healthy; its last lines:"
+  compose logs --tail=40 "$svc" 2>&1 | sed 's/^/    /' || true
+  return 1
+}
+
+# Asks the service itself, where it has an endpoint for it.
+probe() {
+  local url i
+  case $1 in
+    kuloffice) url=http://127.0.0.1:8080/v1/system/status ;;
+    web) url=http://127.0.0.1:3000/ ;;
+    solange) url=http://127.0.0.1:8090/healthz ;;
+    *) return 0 ;;
+  esac
+  for i in $(seq 20); do
+    compose exec -T "$1" wget -q -O /dev/null "$url" 2> /dev/null && return 0
+    sleep 3
+  done
+  say "$1 does not answer $url"
+  return 1
+}
+
+check_unit() {
+  local svc timeout=180
+  [[ $1 == keycloak ]] && timeout=300
+  for svc in $(unit_services "$1"); do
+    wait_service "$svc" "$timeout" && probe "$svc" || return 1
+  done
+  say "$1 is healthy"
+}
+
+# ── data ─────────────────────────────────────────────────────────────────────
+
+pg() { compose exec -T db psql -q -v ON_ERROR_STOP=1 -U postgres "$@"; }
+
+db_dump() { # database file
+  mkdir -p "$(dirname "$2")"
+  compose exec -T db pg_dump -U postgres -d "$1" | gzip > "$2.part"
+  mv "$2.part" "$2"
+}
+
+db_wipe() {
+  pg -c "DROP DATABASE IF EXISTS $1 WITH (FORCE)" -c "CREATE DATABASE $1 OWNER $1"
+}
+
+db_restore() { # database file
+  db_wipe "$1"
+  gunzip -c "$2" | pg -d "$1" > /dev/null
+}
+
+backup_db() { # database label → prints the file
+  local file
+  file=$STATE/backups/$1/$(date +%Y%m%d-%H%M%S)-$2.sql.gz
+  db_dump "$1" "$file"
+  ls -1t "$STATE/backups/$1"/*.sql.gz 2> /dev/null | tail -n +$((KEEP + 1)) | xargs -r rm -f
+  echo "$file"
+}
+
+# kuloffice's files in MinIO, through the mc image the stack already has.
+buckets() { echo "$(env_get KYC_BUCKET || true) $(env_get PENDING_BUCKET || true) $(env_get LOGO_BUCKET || true)" | awk '{
+  print ($1 == "" ? "kyc" : $1), ($2 == "" ? "kyc-pending" : $2), ($3 == "" ? "logos" : $3) }'; }
+
+mc_sh() { # host directory, script
+  mkdir -p "$1"
+  compose run --rm --no-deps -T --user "$(id -u):$(id -g)" -e MC_CONFIG_DIR=/tmp/mc \
+    -v "$DEPLOY_DIR/$1:/backup" --entrypoint sh minio-init -ec \
+    "mc alias set local http://minio:9000 \"\$MINIO_ROOT_USER\" \"\$MINIO_ROOT_PASSWORD\" >/dev/null; $2"
+}
+files_backup() { local b s=""; for b in $(buckets); do s="$s mkdir -p /backup/$b; mc mirror --quiet local/$b /backup/$b;"; done; mc_sh "$1" "$s"; }
+files_wipe() { local b s=""; for b in $(buckets); do s="$s mc rm --recursive --force --quiet local/$b >/dev/null 2>&1 || true;"; done; mc_sh "$STATE/tmp" "$s"; }
+files_restore() {
+  local b s=""
+  for b in $(buckets); do s="$s mc rm --recursive --force --quiet local/$b >/dev/null 2>&1 || true; [ ! -d /backup/$b ] || mc mirror --quiet /backup/$b local/$b;"; done
+  mc_sh "$1" "$s"
+}
+
+# kuloffice's records of Solange's codes, cleared when Solange is reset.
+QR_TABLES="qr_codes qr_code_stats payment_requests solange_events solange_conversions"
+SOLANGE_ENV_KEYS="KULOFFICE_SOLANGE_API_KEY KULOFFICE_SOLANGE_WEBHOOK_SECRETS"
+clear_qr_tables() {
+  local t list="" existing
+  for t in $QR_TABLES; do list="$list${list:+,}'$t'"; done
+  existing=$(pg -d kuloffice -tA -c "SELECT string_agg(quote_ident(tablename), ', ') FROM pg_tables
+    WHERE schemaname = 'public' AND tablename IN ($list)")
+  [[ -z $existing ]] || pg -d kuloffice -c "TRUNCATE $existing CASCADE"
+}
+
+# ── resets ───────────────────────────────────────────────────────────────────
+#
+# state/resets/<id>/: manifest, one dump per database, files/ (kuloffice's
+# buckets), env (the .env lines a reset changes). Kept until the unit moves to
+# another minor, since nothing rolls back past that.
+
+members_of() { echo "$1 $(unit_dependents "$1")"; }
+
+# Saves everything a reset of $1 wipes; prints the snapshot's directory.
+snapshot() { # unit to-tag
+  local unit=$1 id dir m db dbs="" files=no members="" k
+  id=$(date +%Y%m%d-%H%M%S)-$unit
+  dir=$STATE/resets/$id
+  mkdir -p "$dir"
+  for m in $(members_of "$unit"); do
+    members="$members $m=$(unit_tag "$m")"
+    for db in $(unit_databases "$m"); do dbs="$dbs $db"; done
+    [[ $m == kuloffice ]] && files=yes
+  done
+  for db in $dbs; do say "saving database $db" >&2; db_dump "$db" "$dir/$db.sql.gz"; done
+  if [[ $files == yes ]]; then say "saving kuloffice's files" >&2; files_backup "$dir/files" > /dev/null; fi
+  : > "$dir/env"
+  for k in $SOLANGE_ENV_KEYS; do printf '%s=%s\n' "$k" "$(env_get "$k" || true)" >> "$dir/env"; done
+  cat > "$dir/manifest" << EOF
+RESET_UNIT=$unit
+RESET_FROM=$(unit_tag "$unit")
+RESET_TO=$2
+MEMBERS="${members# }"
+DATABASES="${dbs# }"
+FILES=$files
+EOF
+  echo "$dir"
+}
+
+# Puts back everything a snapshot saved, at the tags it recorded (the unit
+# being rolled back may go to an older alpha than that: $2/$3).
+restore_snapshot() { # dir [unit tag]
+  local dir=$1 m t pair db services=""
+  # shellcheck disable=SC1091
+  . "$dir/manifest"
+  for pair in $MEMBERS; do services="$services $(unit_services "${pair%%=*}")"; done
+  say "stopping$services"
+  compose stop $services > /dev/null 2>&1 || true
+  for db in $DATABASES; do say "restoring database $db"; db_restore "$db" "$dir/$db.sql.gz"; done
+  if [[ $FILES == yes ]]; then say "restoring kuloffice's files"; files_restore "$dir/files" > /dev/null; fi
+  while IFS='=' read -r k v; do [[ -n $k ]] && env_set "$k" "$v"; done < "$dir/env"
+  for pair in $MEMBERS; do
+    m=${pair%%=*}; t=${pair#*=}
+    [[ $m == "${2:-}" ]] && t=$3
+    [[ -n $t ]] && switch_unit "$m" "$t"
+  done
+  compose up -d $services || true  # the health check decides
+  for pair in $MEMBERS; do check_unit "${pair%%=*}" || return 1; done
+}
+
+# Wipes the unit's data and its dependents', then starts them at the new tag.
+reset_unit() { # unit tag
+  local unit=$1 tag=$2 m db services="" had_qr
+  for m in $(members_of "$unit"); do services="$services $(unit_services "$m")"; done
+  say "stopping$services"
+  compose stop $services > /dev/null 2>&1 || true
+  for db in $(unit_databases "$unit"); do say "wiping database $db"; db_wipe "$db"; done
+  case $unit in
+    keycloak) say "wiping database kuloffice and its files"; db_wipe kuloffice; files_wipe > /dev/null ;;
+    kuloffice) say "wiping kuloffice's files"; files_wipe > /dev/null ;;
+    solange) say "clearing kuloffice's QR records"; clear_qr_tables ;;
+  esac
+  switch_unit "$unit" "$tag"
+  compose up -d $services || true  # the health check decides
+  for m in $(members_of "$unit"); do check_unit "$m" || return 1; done
+
+  # What the fresh databases need before they work.
+  case $unit in
+    keycloak | kuloffice)
+      say "provisioning realms, the license and identity providers (init)"
+      compose --profile tools run --rm tools /tools/init.sh
+      ;;
+    solange)
+      had_qr=$(env_get KULOFFICE_SOLANGE_API_KEY || true)
+      if [[ -n $had_qr ]]; then
+        say "issuing kuloffice's Solange key and webhook again"
+        for k in $SOLANGE_ENV_KEYS; do env_set "$k" ""; done
+        ENV_FILE=$ENV_FILE COMPOSE="docker compose --env-file $ENV_FILE" sh scripts/solange-kulpay.sh
+        check_unit kuloffice || return 1
+      fi
+      ;;
+  esac
+  [[ $unit == keycloak ]] && say "note: staff accounts are gone (make operator again); token panel sign-ins are stale"
+  return 0
+}
+
+prune_resets() {
+  local dir cur
+  for dir in "$STATE"/resets/*/; do
+    [[ -f $dir/manifest ]] || continue
+    (
+      # shellcheck disable=SC1091
+      . "$dir/manifest"
+      cur=$(unit_tag "$RESET_UNIT")
+      if is_version "$cur" && is_version "$RESET_FROM" && [[ $(line_of "$cur") != "$(line_of "$RESET_FROM")" ]]; then
+        rm -rf "$dir"
+      fi
+    )
+  done
+}
+
+# ── commands ─────────────────────────────────────────────────────────────────
+
+valid_unit() { is_unit "${1:-}" || die "unknown unit '${1:-}' (one of: $UNITS)"; }
+valid_tag() { is_version "${1:-}" || die "'${1:-}' is not a tag like v0.1.0-alpha01"; }
+
+cmd_deploy() {
+  local unit=${1:-} tag=${2:-} cur mode=update db backups="" prev_files
+  valid_unit "$unit"; valid_tag "$tag"
+  lock; baseline "$unit"
+  cur=$(unit_tag "$unit")
+  [[ $cur == "$tag" ]] && { say "$unit is already at $tag"; return 0; }
+  if is_version "$cur"; then
+    [[ $(version_cmp "$tag" "$cur") -lt 0 ]] && die "$tag is older than $cur: use rollback"
+    [[ $(patch_of "$tag") != "$(patch_of "$cur")" ]] && mode=reset
+  fi
+  say "deploy $unit: ${cur:-nothing} → $tag ($mode)"
+  pull_unit "$unit" "$tag"
+
+  if [[ $mode == update ]]; then
+    for db in $(unit_databases "$unit"); do
+      say "backing up $db"
+      backups="$backups $(backup_db "$db" "$unit-${cur:-none}")"
+    done
+    switch_unit "$unit" "$tag"
+    compose up -d $(unit_services "$unit") || true  # the health check decides
+    if check_unit "$unit"; then
+      hist_add "$unit" "$tag" deploy; log_release deploy "$unit" "$cur" "$tag" ok
+      prune_images "$unit"; prune_resets
+      say "deployed $unit $tag"
+      return 0
+    fi
+    say "rolling back to ${cur:-nothing}"
+    [[ -n $cur ]] || die "no previous tag to go back to"
+    switch_unit "$unit" "$cur"
+    compose up -d $(unit_services "$unit") || true  # the health check decides
+    if ! check_unit "$unit"; then
+      say "$cur fails too on today's data: restoring the backup taken before"
+      for prev_files in $backups; do
+        db=$(basename "$(dirname "$prev_files")"); db_restore "$db" "$prev_files"
+      done
+      compose up -d --force-recreate $(unit_services "$unit") || true  # the health check decides
+      check_unit "$unit" || { log_release deploy "$unit" "$cur" "$tag" broken; die "$unit is down; see make logs"; }
+    fi
+    log_release deploy "$unit" "$cur" "$tag" rolled-back
+    die "$tag failed its health check; $unit is back on $cur"
+  fi
+
+  local snap
+  snap=$(snapshot "$unit" "$tag")
+  local deps
+  deps=$(unit_dependents "$unit")
+  say "reset $unit${deps:+ and $deps}; saved in $snap"
+  if reset_unit "$unit" "$tag"; then
+    hist_add "$unit" "$tag" reset; log_release reset "$unit" "$cur" "$tag" ok "$snap"
+    for m in $(unit_dependents "$unit"); do log_release wiped "$m" "$(unit_tag "$m")" "$(unit_tag "$m")" ok "by $unit $tag"; done
+    prune_images "$unit"; prune_resets
+    say "deployed $unit $tag on fresh data"
+    return 0
+  fi
+  say "the reset failed: restoring everything it wiped"
+  restore_snapshot "$snap" || { log_release reset "$unit" "$cur" "$tag" broken "$snap"; die "the restore failed too; the saved data is in $snap"; }
+  log_release reset "$unit" "$cur" "$tag" rolled-back "$snap"
+  die "$tag failed; $unit and its dependents are back as they were"
+}
+
+cmd_rollback() {
+  local unit=${1:-} steps=1 to="" yes=no cur target idx i tags=() dir best="" m t pair
+  valid_unit "$unit"; shift
+  while (($#)); do
+    case $1 in
+      --steps) steps=${2:?}; shift ;;
+      --to) to=${2:?}; shift ;;
+      --yes) yes=yes ;;
+      *) die "unknown option $1" ;;
+    esac
+    shift
+  done
+  [[ $steps =~ ^[0-9]+$ ]] && ((steps > 0)) || die "--steps takes a positive number"
+  lock; baseline "$unit"
+  cur=$(unit_tag "$unit")
+  while IFS= read -r i; do tags+=("$i"); done < <(hist_tags "$unit")
+  idx=-1
+  for i in "${!tags[@]}"; do [[ ${tags[$i]} == "$cur" ]] && idx=$i; done
+  if [[ -n $to ]]; then
+    target=$to
+    printf '%s\n' "${tags[@]}" | grep -qx -- "$to" || die "$to was never deployed for $unit (make releases U=$unit)"
+  else
+    ((idx >= 0)) || die "$cur is not in $unit's history"
+    ((idx - steps >= 0)) || die "$unit has only $idx earlier release(s)"
+    target=${tags[$((idx - steps))]}
+  fi
+  [[ $target == "$cur" ]] && { say "$unit is already at $target"; return 0; }
+  if is_version "$target" && is_version "$cur"; then
+    [[ $(line_of "$target") == "$(line_of "$cur")" ]] || die "$target is on another minor than $cur: no rollback across it"
+  fi
+
+  # Across a reset of this unit: put back what that reset wiped.
+  if is_version "$target" && is_version "$cur" && [[ $(patch_of "$target") != "$(patch_of "$cur")" ]]; then
+    [[ $(version_cmp "$target" "$cur") -lt 0 ]] || die "$target is a newer version: deploy it (push its tag again)"
+    for dir in "$STATE"/resets/*-"$unit"/; do
+      [[ -f $dir/manifest ]] || continue
+      (. "$dir/manifest"; [[ $RESET_UNIT == "$unit" && $(patch_of "$RESET_FROM") == "$(patch_of "$target")" ]]) && best=$dir
+    done
+    [[ -n $best ]] || die "nothing saved from before $unit left $(patch_of "$target"); it cannot be restored"
+    # shellcheck disable=SC1091
+    (. "$best/manifest"
+      echo "Rolling $unit back to $target crosses its reset of $(basename "$best" | cut -d- -f1-2):"
+      for pair in $MEMBERS; do
+        m=${pair%%=*}; t=${pair#*=}; [[ $m == "$unit" ]] && t=$target
+        echo "  $m: $(unit_tag "$m") → $t, data as it was before the reset"
+      done
+      echo "Everything these units stored since then is lost.")
+    for pair in $(. "$best/manifest"; echo "$MEMBERS"); do
+      m=${pair%%=*}; t=${pair#*=}; [[ $m == "$unit" ]] && continue
+      if is_version "$t" && is_version "$(unit_tag "$m")" && [[ $(line_of "$t") != "$(line_of "$(unit_tag "$m")")" ]]; then
+        die "$m has moved to another minor since; it cannot go back to $t"
+      fi
+    done
+    [[ $yes == yes ]] || { echo "Run again with confirmation (--yes, or 'confirm' in the workflow) to do it."; exit 3; }
+    for pair in $(. "$best/manifest"; echo "$MEMBERS"); do
+      m=${pair%%=*}; t=${pair#*=}; [[ $m == "$unit" ]] && t=$target
+      [[ -n $t ]] && pull_unit "$m" "$t"
+    done
+    local now
+    now=$(snapshot "$unit" "$cur")   # today's data, in case the restore fails
+    if restore_snapshot "$best" "$unit" "$target"; then
+      for pair in $(. "$best/manifest"; echo "$MEMBERS"); do
+        m=${pair%%=*}; hist_add "$m" "$(unit_tag "$m")" rollback
+      done
+      log_release rollback "$unit" "$cur" "$target" ok "restored $best"
+      rm -rf "$now"
+      say "rolled $unit back to $target, with its data from before the reset"
+      return 0
+    fi
+    say "the rollback failed: putting today's data back"
+    restore_snapshot "$now" || die "that failed too; today's data is saved in $now"
+    log_release rollback "$unit" "$cur" "$target" failed
+    die "could not roll $unit back to $target; it is back on $cur"
+  fi
+
+  say "rollback $unit: $cur → $target"
+  pull_unit "$unit" "$target"
+  for db in $(unit_databases "$unit"); do say "backing up $db"; backup_db "$db" "$unit-$cur" > /dev/null; done
+  switch_unit "$unit" "$target"
+  compose up -d $(unit_services "$unit") || true  # the health check decides
+  if check_unit "$unit"; then
+    hist_add "$unit" "$target" rollback; log_release rollback "$unit" "$cur" "$target" ok
+    say "rolled $unit back to $target"
+    return 0
+  fi
+  say "$target is not healthy: back to $cur"
+  switch_unit "$unit" "$cur"
+  compose up -d $(unit_services "$unit") || true  # the health check decides
+  check_unit "$unit" || true
+  log_release rollback "$unit" "$cur" "$target" failed
+  die "$target failed its health check; $unit is back on $cur"
+}
+
+cmd_releases() {
+  local unit cur
+  for unit in ${1:-$UNITS}; do
+    valid_unit "$unit"
+    [[ -s $(hist_file "$unit") ]] || continue
+    cur=$(unit_tag "$unit")
+    echo "== $unit (running $cur)"
+    awk -F'\t' '{ printf "  %s  %-22s %-9s %s\n", $1, $2, $3, $4 }' "$(hist_file "$unit")"
+  done
+  if [[ -f $STATE/releases.log ]]; then
+    echo "== last attempts"
+    tail -n 15 "$STATE/releases.log" | awk -F'\t' '{ printf "  %s  %-10s %-9s %s → %s  %s  %s %s\n", $1, $2, $3, $4, $5, $7, $6, $8 }'
+  fi
+}
+
+cmd_status() {
+  local unit
+  for unit in $UNITS; do printf '  %-11s %s\n' "$unit" "$(unit_tag "$unit")"; done
+}
+
+cmd_health() {
+  local unit bad=0
+  for unit in ${1:-$UNITS}; do
+    valid_unit "$unit"
+    [[ $unit == kulportal && -z $(container_of kulportal) ]] && continue
+    check_unit "$unit" || bad=1
+  done
+  return $bad
+}
+
+cmd_backup() {
+  [[ -n ${1:-} ]] || die "usage: kulpay backup <database>"
+  lock; say "backing up $1"; say "saved $(backup_db "$1" manual)"
+}
+
+cmd_restore() {
+  [[ -n ${1:-} && -f ${2:-} ]] || die "usage: kulpay restore <database> <file> --yes"
+  [[ ${3:-} == --yes ]] || die "this replaces database $1 with $2; add --yes"
+  lock
+  say "backing up $1 first: $(backup_db "$1" before-restore)"
+  db_restore "$1" "$2"
+  say "restored $1; recreate its service (make restart S=…)"
+}
+
+args=()
+while (($#)); do
+  case $1 in
+    --actor) ACTOR=${2:?}; shift ;;
+    *) args+=("$1") ;;
+  esac
+  shift
+done
+set -- "${args[@]+"${args[@]}"}"
+command=${1:-help}; shift || true
+case $command in
+  deploy) cmd_deploy "$@" ;;
+  rollback) cmd_rollback "$@" ;;
+  releases) cmd_releases "$@" ;;
+  status) cmd_status ;;
+  health) cmd_health "$@" ;;
+  backup) cmd_backup "$@" ;;
+  restore) cmd_restore "$@" ;;
+  *) sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'; [[ $command == help ]] ;;
+esac

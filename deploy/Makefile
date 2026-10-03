@@ -6,7 +6,8 @@
 .PHONY: help setup sync-env clean-env-backups config check-images \
         images push theme license \
         start start-portal stop restart logs ps update clean \
-        init operator solange-kulpay
+        init operator solange-kulpay \
+        deploy rollback releases status health backup restore
 
 ENV_FILE ?= .env
 ENV_EXAMPLE ?= .env.example
@@ -38,6 +39,14 @@ help:
 	@echo "  make stop / ps / logs [S=x]"
 	@echo "  make restart [S=x]      recreate everything, or one service (reloads .env)"
 	@echo "  make update             pull the tags in .env and recreate what changed"
+	@echo ""
+	@echo "Releases (on the server; CI runs the same tool, bin/kulpay)"
+	@echo "  make deploy U=web T=v0.1.0-alpha02   switch a unit to a tag (health-checked)"
+	@echo "  make rollback U=web [STEPS=1 | TO=tag] [YES=1]"
+	@echo "  make releases [U=web]   what ran, and the last attempts"
+	@echo "  make status             each unit's current tag"
+	@echo "  make health [U=web]     check the running units"
+	@echo "  make backup DB=kuloffice / make restore DB=kuloffice FILE=… YES=1"
 	@echo "  make clean              remove containers AND volumes (every database)"
 	@echo ""
 	@echo "Provisioning (on the server, after start)"
@@ -75,8 +84,13 @@ check-images:
 
 # How each image is built: context, Dockerfile, extra build contexts and args.
 # Paths in .env are relative to this directory.
-build_KEYCLOAK        = docker build --platform $$TARGET_PLATFORM -t "$$KEYCLOAK_IMAGE:$$KEYCLOAK_TAG" "$$INTAKA_DIR"
-build_KULOFFICE       = key=$$(cat "$$KULOFFICE_DIR/keys/public.pem.base64") || exit 1; \
+# Keycloak: intaka's image, then the login theme on top (images/keycloak.Dockerfile).
+build_KEYCLOAK        = docker build --platform $$TARGET_PLATFORM -t "kulpay-keycloak-base:$$KEYCLOAK_TAG" "$$INTAKA_DIR" && \
+	docker build --platform $$TARGET_PLATFORM -t "$$KEYCLOAK_IMAGE:$$KEYCLOAK_TAG" -f images/keycloak.Dockerfile \
+	  --build-arg BASE="kulpay-keycloak-base:$$KEYCLOAK_TAG" "$$INTAKA_DIR/demo/theme"
+# The license public key is kept here (keys/), so CI and laptops link the same
+# one: the key the server's KULOFFICE_LICENSE_KEY was signed for.
+build_KULOFFICE       = key=$$(cat keys/kuloffice-license.pub.base64) || exit 1; \
 	docker build --platform $$TARGET_PLATFORM -t "$$KULOFFICE_IMAGE:$$KULOFFICE_TAG" \
 	  -f images/kuloffice.Dockerfile --build-arg LICENSE_PUBLIC_KEY="$$key" "$$KULOFFICE_DIR"
 build_WEB             = docker build --platform $$TARGET_PLATFORM -t "$$WEB_IMAGE:$$WEB_TAG" -f images/web.Dockerfile "$$WEB_DIR"
@@ -115,7 +129,8 @@ theme:
 	rm -rf theme && mkdir -p theme && cp -R "$$INTAKA_DIR/demo/theme/kulpay" theme/ && \
 	echo "theme/kulpay copied from $$INTAKA_DIR/demo/theme (commit it)"
 
-# A license key for KULOFFICE_LICENSE_KEY, signed with kuloffice's private key.
+# A license key for KULOFFICE_LICENSE_KEY, signed with kuloffice's private key
+# (KULOFFICE_DIR/keys, the pair of keys/kuloffice-license.pub.base64).
 license:
 	@set -a; . ./$(ENV_FILE); set +a; \
 	$(MAKE) --no-print-directory -C "$$KULOFFICE_DIR" generate-license >/dev/null && cat "$$KULOFFICE_DIR/keys/license.key"; echo
@@ -170,3 +185,35 @@ operator:
 # recreated to read them.
 solange-kulpay:
 	@ENV_FILE=$(ENV_FILE) COMPOSE="$(COMPOSE)" sh scripts/solange-kulpay.sh
+
+# ── releases (server) ─────────────────────────────────────────────────────────
+#
+# bin/kulpay: what CI runs over SSH, for people. U is a unit (lib/units.sh):
+# keycloak, kuloffice, web, fileserver, solange, kulportal.
+
+KULPAY = ENV_FILE=$(ENV_FILE) bin/kulpay --actor "$${SUDO_USER:-$$USER}"
+
+deploy:
+	@[ -n "$(U)" ] && [ -n "$(T)" ] || { echo "usage: make deploy U=<unit> T=<tag>" >&2; exit 1; }
+	@$(KULPAY) deploy $(U) $(T)
+
+rollback:
+	@[ -n "$(U)" ] || { echo "usage: make rollback U=<unit> [STEPS=1 | TO=<tag>] [YES=1]" >&2; exit 1; }
+	@$(KULPAY) rollback $(U) $(if $(TO),--to $(TO),--steps $(or $(STEPS),1)) $(if $(YES),--yes)
+
+releases:
+	@$(KULPAY) releases $(U)
+
+status:
+	@$(KULPAY) status
+
+health:
+	@$(KULPAY) health $(U)
+
+backup:
+	@[ -n "$(DB)" ] || { echo "usage: make backup DB=<kuloffice|keycloak|solange>" >&2; exit 1; }
+	@$(KULPAY) backup $(DB)
+
+restore:
+	@[ -n "$(DB)" ] && [ -n "$(FILE)" ] || { echo "usage: make restore DB=<database> FILE=<backup> YES=1" >&2; exit 1; }
+	@$(KULPAY) restore $(DB) $(FILE) $(if $(YES),--yes)

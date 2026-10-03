@@ -4,3 +4,5 @@ kuloffice.env
 kulportal.env
 geoip/*
 !geoip/.gitkeep
+state/
+.ci.env

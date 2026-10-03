@@ -1,0 +1,80 @@
+#!/bin/sh
+# Once, as root, on the server: the account CI deploys through.
+#
+#   sudo sh bin/setup-deploy-user.sh [user]      (default: kulpay-deploy)
+#
+# - The user, in the docker group, with a long random password (printed once:
+#   put it in GitHub as DEPLOY_PASSWORD).
+# - A group shared with whoever owns this checkout, so both can run make and
+#   the deploy tool on the same files (.env becomes group-readable: 660).
+# - sshd: password login for that user only, forced to bin/kulpay-ssh, with no
+#   shell, TTY or forwarding. Docker access is root-equivalent; the forced
+#   command is what keeps the password from being more than a deploy button.
+# - fail2ban, if it isn't there.
+#
+# Safe to run again: it resets the password and rewrites the sshd snippet.
+set -eu
+[ "$(id -u)" = 0 ] || { echo "run as root (sudo)" >&2; exit 1; }
+user=${1:-kulpay-deploy}
+group=kulpay
+deploy_dir=$(cd "$(dirname "$0")/.." && pwd)
+repo=$(cd "$deploy_dir/.." && pwd)
+owner=$(stat -c %U "$repo")
+
+getent group "$group" > /dev/null || groupadd "$group"
+id "$user" > /dev/null 2>&1 || useradd -m -s /bin/bash "$user"
+usermod -aG docker,"$group" "$user"
+[ "$owner" = root ] || usermod -aG "$group" "$owner"
+
+# The checkout: group-owned and group-writable, new files inherit the group.
+chgrp -R "$group" "$repo"
+chmod -R g+rwX "$repo"
+find "$repo" -type d -exec chmod g+s {} +
+for f in .env kuloffice.env kulportal.env; do [ ! -f "$deploy_dir/$f" ] || chmod 660 "$deploy_dir/$f"; done
+git -C "$repo" config core.sharedRepository group
+su - "$user" -c "git config --global --add safe.directory '$repo'"
+
+password=$(head -c 32 /dev/urandom | base64 | tr -d '=+/' | cut -c1-40)
+echo "$user:$password" | chpasswd
+
+cat > /etc/ssh/sshd_config.d/kulpay-deploy.conf << EOF
+# KulPay CI: password login, forced to the deploy tool (bin/setup-deploy-user.sh).
+Match User $user
+    PasswordAuthentication yes
+    KbdInteractiveAuthentication no
+    ForceCommand $deploy_dir/bin/kulpay-ssh
+    PermitTTY no
+    AllowTcpForwarding no
+    AllowAgentForwarding no
+    AllowStreamLocalForwarding no
+    X11Forwarding no
+    PermitTunnel no
+Match all
+EOF
+grep -Eq '^\s*Include\s+/etc/ssh/sshd_config.d/\*\.conf' /etc/ssh/sshd_config ||
+  echo "warning: /etc/ssh/sshd_config doesn't include sshd_config.d/*.conf; add the snippet's lines to it" >&2
+sshd -t
+systemctl reload ssh 2> /dev/null || systemctl reload sshd
+
+if ! command -v fail2ban-client > /dev/null; then
+  if command -v apt-get > /dev/null; then
+    apt-get install -y -q fail2ban > /dev/null && systemctl enable --now fail2ban > /dev/null 2>&1 || true
+    echo "fail2ban installed (its sshd jail is on by default)"
+  else
+    echo "warning: install fail2ban yourself" >&2
+  fi
+fi
+
+host_key=$(ssh-keyscan -t ed25519 localhost 2> /dev/null | awk '{ print $2, $3 }')
+cat << EOF
+
+Done. In GitHub (organisation secrets, or each repository's):
+  DEPLOY_HOST          this server's address
+  DEPLOY_USER          $user
+  DEPLOY_PASSWORD      $password
+  DEPLOY_KNOWN_HOSTS   <address> $host_key
+                       (the line, with this server's address in front)
+
+The password is not shown again; run this script again for a new one.
+Check: ssh $user@<address> status
+EOF

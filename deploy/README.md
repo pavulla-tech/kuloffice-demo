@@ -35,8 +35,9 @@ make license                 # prints a KULOFFICE_LICENSE_KEY for the server's .
 ```
 
 - kuloffice's image links the license public key from
-  `KULOFFICE_DIR/keys/public.pem.base64`; `make license` signs with the private
-  key beside it. Keep that pair: a license only verifies against its own key.
+  `keys/kuloffice-license.pub.base64` here (CI uses it too); `make license`
+  signs with its private key, `KULOFFICE_DIR/keys/private.pem.base64`. Keep
+  that pair: a license only verifies against its own key.
 - Solange is built from `cmd/solange` (the new core). Its own `Dockerfile`
   builds the old app; this one does not use it.
 - `make theme` refreshes `theme/kulpay` (the login look, from intaka's
@@ -155,13 +156,106 @@ This is a fresh start: nobody's accounts carry over. Users sign up again, and
 the mobile apps' saved sessions and device keys stop working once `auth.`
 points here.
 
-## Updating
+## Releases (CI)
+
+Each service repository releases itself: push a tag, and GitHub Actions tests,
+builds, pushes to Docker Hub and deploys on this server.
 
 ```bash
-# laptop: new tags in .env, then
-make images S="KULOFFICE WEB" && make push S="KULOFFICE WEB"
-# server: the same tags in .env, then
-make update
+git tag v0.1.0-alpha03 && git push origin v0.1.0-alpha03
+```
+
+| Repository | Unit | Images | Its data |
+|---|---|---|---|
+| intaka | `keycloak` | keycloak (with the login theme), token-panel, tools | Keycloak's database |
+| kuloffice | `kuloffice` | kuloffice | kuloffice's database and its MinIO buckets |
+| kulpay-webapp | `web` | web | none |
+| boquisso-fileserver | `fileserver` | fileserver | none |
+| solange | `solange` | solange, solange-console | Solange's database |
+| kulportal | `kulportal` | kulportal | none (no workflow yet) |
+
+Each repository's `.github/workflows/release.yml` runs its tests, then this
+repository's reusable `service.yml`, which builds with the same recipes as
+`make images` (`ci/build.sh`) and runs `deploy <unit> <tag>` on the server.
+
+**Tags.** `vMAJOR.MINOR.PATCH-alphaNN`; the workflow file must be in the
+tagged commit.
+
+- **A new alpha** (`v0.1.0-alpha02` → `alpha03`) updates in place: the
+  unit's database is backed up, the tag switched, the unit health-checked
+  (running, healthy, not restarting, and its own endpoint where it has one).
+  If it fails, it goes back to the previous tag (and, if that fails too on
+  the migrated data, to the backup), and the run turns red: GitHub emails
+  whoever pushed the tag.
+- **A new patch or minor** (`v0.1.0-*` → `v0.1.1-*`) resets the unit: its
+  data is saved, wiped and started fresh, along with the units whose data
+  points into it:
+  - Keycloak → kuloffice too (its accounts hold Keycloak's user ids), its
+    files, then `init`. Staff accounts are gone: `make operator` again.
+  - Solange → kuloffice's QR records, then `solange-kulpay` (a new key).
+  - kuloffice → its files, then `init`.
+
+  If the reset fails, everything it wiped is put back.
+- **Nothing rolls back below the current minor:** a `v0.2.0` ends `v0.1`'s
+  history.
+
+**Rollback.** kuloffice-demo's **Rollback** workflow (Actions → Rollback →
+Run): a unit, then "steps" back or an exact tag ("to"). Within a version only
+the image changes. Across a reset, the data that reset saved is restored for
+every unit it wiped, and what they stored since is lost: the run stops and
+says so unless "confirm" is ticked. The **Server** workflow shows `releases`
+(the tags a rollback can go to), `status` and `health`.
+
+**On the server** the same tool, `bin/kulpay`:
+
+```bash
+make status                          # each unit's tag
+make releases [U=web]                # history and the last attempts
+make health [U=web]
+make deploy U=web T=v0.1.0-alpha03
+make rollback U=web [STEPS=2 | TO=v0.1.0-alpha01] [YES=1]
+make backup DB=kuloffice
+make restore DB=kuloffice FILE=state/backups/kuloffice/… YES=1
+```
+
+One deploy runs at a time; the others wait. Everything it keeps is in
+`state/` (gitignored): the history per unit, `releases.log`, the last 5
+backups per database, the data saved by resets (kept until the unit's next
+minor), and the login theme copied out of the running Keycloak image
+(`KEYCLOAK_THEME_DIR`). The newest 5 tags of each image stay on disk;
+Docker Hub keeps them all. A unit's first deploy records what runs now as its
+first entry, so a rollback can return to it.
+
+### Setting it up (once)
+
+1. **The deploy user**, on the server, as root:
+   `sudo sh bin/setup-deploy-user.sh`. It creates `kulpay-deploy` in the
+   docker group with a random password, lets it log in with that password
+   only to run `bin/kulpay-ssh` (no shell, no forwarding), shares this
+   checkout with it through a `kulpay` group, and installs fail2ban. It
+   prints the secrets below.
+2. **Secrets** in GitHub, for the organisation (or each repository plus
+   kuloffice-demo): `DOCKERHUB_USERNAME`, `DOCKERHUB_TOKEN` (a Docker Hub
+   access token that can push to `developerspavs/*`), `DEPLOY_HOST`,
+   `DEPLOY_USER`, `DEPLOY_PASSWORD`, `DEPLOY_KNOWN_HOSTS`, and `DEPLOY_PORT`
+   if SSH isn't on 22.
+3. **Check:** run the Server workflow with `status`.
+
+Before each deploy or rollback the tool brings this checkout up to date
+(`git pull --ff-only`), so compose changes merged here reach the server. A
+local change on the server stops that (the deploy goes on with the kit as it
+is, and says so). A new required setting still needs a person:
+`make sync-env`, fill it in, then deploy.
+
+### By hand
+
+Without CI (or for kulportal), the laptop route still works:
+
+```bash
+# laptop: the unit's tags in .env, then
+make images S="KULOFFICE" && make push S="KULOFFICE"
+# server:
+make deploy U=kuloffice T=<tag>      # or: the tag in .env, then make update
 ```
 
 `make restart S=kuloffice` recreates one service: a plain `docker restart`
@@ -189,7 +283,9 @@ in `kulportal.env`, then `make start-portal` and enable `apache/kulportal.conf`.
 
 - **`KEYCLOAK_PUBLIC_URL` is the token issuer and the passkey rpId.** Changing
   it invalidates every token and passkey. Decide it before the first `make init`.
-- **The login theme is mounted** (`theme/kulpay`) over the image's. It must match
-  the image's templates; refresh both together (`make theme`, `make images S=KEYCLOAK`).
+- **The login theme is mounted** over the image's. Since CI it travels in the
+  Keycloak image and a deploy copies it out (`state/theme/kulpay`), so it
+  always matches. Edits there last until the next Keycloak deploy; change
+  intaka's `demo/theme` instead.
 - **`make clean` deletes every database and stored file**, and asks first.
 - **The token panel holds live tokens.** Never serve it without the password.
