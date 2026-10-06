@@ -7,7 +7,7 @@
         images push theme license \
         start start-portal stop restart logs ps update clean \
         init operator solange-kulpay \
-        deploy rollback releases status health backup restore
+        deploy rollback releases status health backup restore registry-login
 
 ENV_FILE ?= .env
 ENV_EXAMPLE ?= .env.example
@@ -47,6 +47,7 @@ help:
 	@echo "  make status             each unit's current tag"
 	@echo "  make health [U=web]     check the running units"
 	@echo "  make backup DB=kuloffice / make restore DB=kuloffice FILE=… YES=1"
+	@echo "  make registry-login     Docker Hub pull token for the deploy user and you (root)"
 	@echo "  make clean              remove containers AND volumes (every database)"
 	@echo ""
 	@echo "Provisioning (on the server, after start)"
@@ -217,3 +218,8 @@ backup:
 restore:
 	@[ -n "$(DB)" ] && [ -n "$(FILE)" ] || { echo "usage: make restore DB=<database> FILE=<backup> YES=1" >&2; exit 1; }
 	@$(KULPAY) restore $(DB) $(FILE) $(if $(YES),--yes)
+
+# Docker Hub credentials for pulls (a read-only token), for the deploy user
+# and whoever runs make here. Asks for them; needs root.
+registry-login:
+	@sudo sh bin/registry-login.sh

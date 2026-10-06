@@ -134,7 +134,8 @@ pull_unit() { # unit tag: fails before anything changes
   for name in $(unit_images "$1"); do
     image=$(env_get "${name}_IMAGE")
     say "pulling $image:$2"
-    docker pull -q "$image:$2" > /dev/null || die "$image:$2 is not on Docker Hub"
+    docker pull -q "$image:$2" > /dev/null ||
+      die "could not pull $image:$2 (not on Docker Hub, or the server's login is stale: make registry-login)"
   done
 }
 

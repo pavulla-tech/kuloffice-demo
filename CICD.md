@@ -156,6 +156,15 @@ Notes:
   identity isn't checked, so someone impersonating it could capture the
   password.
 
+### On the server (not in GitHub)
+
+The server pulls images with its own Docker Hub login: a personal access
+token with the **Public Repo Read-only** scope, separate from CI's push token.
+Create it on Docker Hub (Account settings → Personal access tokens), then on
+the server, in the deploy folder: `make registry-login`. It stores the login
+for the deploy user (CI's deploys and rollbacks) and for you (`make` by hand).
+Run it again to rotate the token.
+
 ## The server side, briefly
 
 - **SSH access:** CI logs in as `kulpay-deploy` with a password. sshd forces
