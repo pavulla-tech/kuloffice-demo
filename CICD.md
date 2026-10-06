@@ -99,29 +99,24 @@ counts as failed. Nobody else is emailed, so look at the Actions tab, or run
 
 ## Secrets
 
-All of them are **organisation secrets** in `pavulla-tech`, shared with the
-six repositories below only ("selected repositories", not all 177). Verified
-on the org's Free plan: the private repositories see them too.
+Where they live, because of GitHub Free: **organisation secrets reach public
+repositories only.** Private repositories receive them empty, even though
+GitHub lists them as available. So:
 
-Set or change one from a terminal (an org admin; the value is read from
-stdin, so it stays out of your shell history):
+- **The five private service repositories** each hold their own copy. One
+  command asks for each value once and sets it in all five:
 
-```bash
-R=kuloffice,kuloffice-demo,kulpay-webapp,intaka,solange,boquisso-fileserver
-gh secret set KULPAY_DOCKERHUB_USERNAME --org pavulla-tech --visibility selected --repos $R
-gh secret set KULPAY_DOCKERHUB_TOKEN    --org pavulla-tech --visibility selected --repos $R
-gh secret set DEPLOY_HOST        --org pavulla-tech --visibility selected --repos $R
-gh secret set DEPLOY_PASSWORD    --org pavulla-tech --visibility selected --repos $R
-gh secret set DEPLOY_KNOWN_HOSTS --org pavulla-tech --visibility selected --repos $R
-```
+  ```bash
+  sh deploy/ci/set-secrets.sh                    # all of them
+  sh deploy/ci/set-secrets.sh DEPLOY_PASSWORD    # change one
+  ```
 
-Each command prompts for the value. Or use the web: Organisation Settings →
-Secrets and variables → Actions → New organization secret, with Repository
-access set to the six repositories. A new repository joining the pipeline
-must be added to each secret's list (`gh secret set … --repos` with the new
-list, or the web).
+- **kuloffice-demo** (public) uses the organisation secrets `DEPLOY_HOST`,
+  `DEPLOY_USER`, `DEPLOY_PASSWORD`, `DEPLOY_KNOWN_HOSTS`, shared with it.
 
-`DEPLOY_USER` is already set (`kulpay-deploy`).
+Change a value in both places. To check them: **Actions → Server →
+`secrets`** reports which are set in kuloffice-demo (lengths, never values).
+Each build also stops early, naming any secret that came through empty.
 
 | Secret | Value | Used by |
 |---|---|---|
