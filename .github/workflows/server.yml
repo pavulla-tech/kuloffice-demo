@@ -1,5 +1,7 @@
 # Looks at the KulPay server: each unit's tag, the release history (the tags a
-# rollback can go to), or a health check of the running units.
+# rollback can go to), or a health check of the running units. "secrets"
+# checks GitHub's side instead: which pipeline secrets are set (their lengths,
+# never their values).
 name: Server
 
 on:
@@ -7,7 +9,7 @@ on:
     inputs:
       action:
         type: choice
-        options: [releases, status, health]
+        options: [releases, status, health, secrets]
       unit:
         description: Only this unit (releases and health)
         type: choice
@@ -22,8 +24,26 @@ jobs:
     name: ${{ inputs.action }}
     runs-on: ubuntu-latest
     steps:
+      - name: Secrets
+        if: inputs.action == 'secrets'
+        env:
+          KULPAY_DOCKERHUB_USERNAME: ${{ secrets.KULPAY_DOCKERHUB_USERNAME }}
+          KULPAY_DOCKERHUB_TOKEN: ${{ secrets.KULPAY_DOCKERHUB_TOKEN }}
+          KULPAY_DOCKERHUB_PULL_TOKEN: ${{ secrets.KULPAY_DOCKERHUB_PULL_TOKEN }}
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_PASSWORD: ${{ secrets.DEPLOY_PASSWORD }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+          DEPLOY_PORT: ${{ secrets.DEPLOY_PORT }}
+        run: |
+          for name in KULPAY_DOCKERHUB_USERNAME KULPAY_DOCKERHUB_TOKEN DEPLOY_HOST DEPLOY_USER DEPLOY_PASSWORD DEPLOY_KNOWN_HOSTS KULPAY_DOCKERHUB_PULL_TOKEN DEPLOY_PORT; do
+            value=$(printenv "$name" || true)
+            if [ -n "$value" ]; then printf '%-28s set (%d characters)\n' "$name" "${#value}"; else printf '%-28s EMPTY\n' "$name"; fi
+          done
       - uses: actions/checkout@v4
+        if: inputs.action != 'secrets'
       - uses: ./.github/actions/kulpay-server
+        if: inputs.action != 'secrets'
         with:
           command: ${{ inputs.action }} ${{ inputs.action != 'status' && inputs.unit != 'all' && inputs.unit || '' }}
           host: ${{ secrets.DEPLOY_HOST }}
