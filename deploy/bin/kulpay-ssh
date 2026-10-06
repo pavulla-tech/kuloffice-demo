@@ -12,15 +12,15 @@ cd "$deploy_dir"
 
 read -r -a args <<< "${SSH_ORIGINAL_COMMAND:-}"
 case ${args[0]:-} in
-  deploy | rollback | releases | status | health) ;;
-  *) echo "allowed: deploy <unit> <tag> | rollback <unit> [--steps N | --to TAG] [--yes] | releases [unit] | status | health [unit]" >&2; exit 2 ;;
+  deploy | rollback | releases | status | health | provision) ;;
+  *) echo "allowed: deploy <unit> <tag> | rollback <unit> [--steps N | --to TAG] [--yes] | releases [unit] | status | health [unit] | provision" >&2; exit 2 ;;
 esac
 for arg in "${args[@]}"; do
   [[ $arg =~ ^[A-Za-z0-9._@=+-]+$ ]] || { echo "refused argument: $arg" >&2; exit 2; }
 done
 
 case ${args[0]} in
-  deploy | rollback)
+  deploy | rollback | provision)
     if git -C .. pull --ff-only -q 2> /dev/null; then
       echo "kit: $(git -C .. log --oneline -1)"
     else

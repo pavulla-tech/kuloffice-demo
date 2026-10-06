@@ -1,7 +1,8 @@
 # Looks at the KulPay server: each unit's tag, the release history (the tags a
 # rollback can go to), or a health check of the running units. "secrets"
 # checks GitHub's side instead: which pipeline secrets are set (their lengths,
-# never their values).
+# never their values). "provision" reruns the stack's setup (make init, then
+# make solange-kulpay); both leave what exists alone.
 name: Server
 
 on:
@@ -9,7 +10,7 @@ on:
     inputs:
       action:
         type: choice
-        options: [releases, status, health, secrets]
+        options: [releases, status, health, provision, secrets]
       unit:
         description: Only this unit (releases and health)
         type: choice
@@ -45,7 +46,7 @@ jobs:
       - uses: ./.github/actions/kulpay-server
         if: inputs.action != 'secrets'
         with:
-          command: ${{ inputs.action }} ${{ inputs.action != 'status' && inputs.unit != 'all' && inputs.unit || '' }}
+          command: ${{ inputs.action }} ${{ (inputs.action == 'releases' || inputs.action == 'health') && inputs.unit != 'all' && inputs.unit || '' }}
           host: ${{ secrets.DEPLOY_HOST }}
           port: ${{ secrets.DEPLOY_PORT || '22' }}
           user: ${{ secrets.DEPLOY_USER }}

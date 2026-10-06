@@ -9,6 +9,7 @@
 #   kulpay health   [unit]                       check running units
 #   kulpay backup   <database>                   a backup now
 #   kulpay restore  <database> <file> --yes      replace a database
+#   kulpay provision                             init, then QR codes (both idempotent)
 #
 # Options anywhere: --actor NAME (who asked; CI passes the GitHub user).
 #
@@ -608,6 +609,24 @@ cmd_health() {
   return $bad
 }
 
+# The stack's own setup, safe to repeat: realms, clients, the kuloffice
+# license and identity providers (make init: an existing realm is left
+# alone), then KulPay's app, key and webhook in Solange (make solange-kulpay:
+# each step only if missing). What a person must still do is listed after.
+cmd_provision() {
+  lock
+  say "init: realms, clients, license, identity providers"
+  compose --profile tools run --rm tools /tools/init.sh
+  say "QR codes: KulPay in Solange, kuloffice's key and webhook"
+  ENV_FILE=$ENV_FILE COMPOSE="docker compose --env-file $ENV_FILE" sh scripts/solange-kulpay.sh
+  check_unit kuloffice
+  echo
+  echo "Configured. Still by hand (deploy/README.md):"
+  [[ -n $(env_get PASSKEY_APP_ORIGINS || true) ]] || echo "  - PASSKEY_APP_ORIGINS is empty: passkeys from the mobile apps are refused"
+  echo "  - staff accounts: make operator EMAIL=… FIRST=… LAST=…"
+  echo "  - App Links: the mobile team's assetlinks.json and apple-app-site-association in /srv/kulpay/well-known/"
+}
+
 cmd_backup() {
   [[ -n ${1:-} ]] || die "usage: kulpay backup <database>"
   lock; say "backing up $1"; say "saved $(backup_db "$1" manual)"
@@ -640,5 +659,6 @@ case $command in
   health) cmd_health "$@" ;;
   backup) cmd_backup "$@" ;;
   restore) cmd_restore "$@" ;;
+  provision) cmd_provision ;;
   *) sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'; [[ $command == help ]] ;;
 esac

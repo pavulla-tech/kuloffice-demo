@@ -89,6 +89,9 @@ In kuloffice-demo: **Actions → Rollback → Run workflow**.
 - `releases`: each unit's history, i.e. the tags a rollback can reach;
 - `status`: what runs now;
 - `health`: checks the running units.
+- `provision`: reruns the stack's setup (`make init`, then
+  `make solange-kulpay`). Both leave what exists alone, so it's safe to
+  repeat. It ends with what still needs a person.
 
 ## Who gets told
 
