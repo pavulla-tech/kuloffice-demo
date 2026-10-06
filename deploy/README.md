@@ -133,7 +133,7 @@ first. Solange posts webhooks to `core.` over HTTPS through the host's Apache
 path with:
 
 ```bash
-docker compose exec solange wget -qO- https://core.kulpay.pavulla.com/v1/system/status
+docker compose exec solange wget -S -O /dev/null https://core.kulpay.pavulla.com/ 2>&1 | grep HTTP/   # any HTTP status: the path works
 ```
 
 For the KulPay app to open scanned codes itself, put the mobile team's

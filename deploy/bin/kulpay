@@ -226,17 +226,23 @@ wait_service() {
   return 1
 }
 
-# Asks the service itself, where it has an endpoint for it.
+# Asks the service itself. Where it has a health endpoint, that must answer
+# 2xx; kuloffice has none that skips authentication, so any HTTP answer from
+# its server counts (a 404 still proves it is up and serving).
 probe() {
-  local url i
+  local url any=no i
   case $1 in
-    kuloffice) url=http://127.0.0.1:8080/v1/system/status ;;
+    kuloffice) url=http://127.0.0.1:8080/; any=yes ;;
     web) url=http://127.0.0.1:3000/ ;;
     solange) url=http://127.0.0.1:8090/healthz ;;
     *) return 0 ;;
   esac
   for i in $(seq 20); do
-    compose exec -T "$1" wget -q -O /dev/null "$url" 2> /dev/null && return 0
+    if [[ $any == yes ]]; then
+      compose exec -T "$1" sh -c "wget -S -q -O /dev/null '$url' 2>&1 | grep -q 'HTTP/'" 2> /dev/null && return 0
+    else
+      compose exec -T "$1" wget -q -O /dev/null "$url" 2> /dev/null && return 0
+    fi
     sleep 3
   done
   say "$1 does not answer $url"
