@@ -39,6 +39,17 @@ id "$user" > /dev/null 2>&1 || useradd -m -s /bin/bash "$user"
 usermod -aG docker,"$group" "$user"
 [ "$owner" = root ] || usermod -aG "$group" "$owner"
 
+# The folders above the checkout (e.g. /root): the group may pass through
+# them to reach it, nothing more (no listing, no reading).
+dir=$(dirname "$repo")
+while [ "$dir" != / ]; do
+  if ! su - "$user" -s /bin/sh -c "test -x '$dir'" 2> /dev/null; then
+    if command -v setfacl > /dev/null; then setfacl -m "g:$group:x" "$dir"; else chmod o+x "$dir"; fi
+    echo "let $group pass through $dir"
+  fi
+  dir=$(dirname "$dir")
+done
+
 # The checkout: group-owned and group-writable, new files inherit the group.
 chgrp -R "$group" "$repo"
 chmod -R g+rwX "$repo"
