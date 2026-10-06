@@ -14,6 +14,15 @@ inputs:
     required: true
   password:
     required: true
+  registry-user:
+    description: Docker Hub user for this run's pulls (with registry-token)
+    default: ""
+  registry-token:
+    description: >
+      A Docker Hub token the server pulls with for this run only (sent on
+      stdin, logged in to a throwaway config, deleted when the run ends).
+      Empty: the server pulls anonymously.
+    default: ""
   known-hosts:
     description: The server's known_hosts line (DEPLOY_KNOWN_HOSTS). Without it the host key is not checked.
     default: ""
@@ -28,6 +37,8 @@ runs:
         LOGIN: ${{ inputs.user }}
         KNOWN: ${{ inputs.known-hosts }}
         COMMAND: ${{ inputs.command }}
+        REGISTRY_USER: ${{ inputs.registry-user }}
+        REGISTRY_TOKEN: ${{ inputs.registry-token }}
       run: |
         command -v sshpass > /dev/null || { sudo apt-get update -qq && sudo apt-get install -y -qq sshpass > /dev/null; }
         opts=(-T -p "$PORT" -o PubkeyAuthentication=no -o PreferredAuthentications=password
@@ -39,4 +50,10 @@ runs:
           echo "::warning::DEPLOY_KNOWN_HOSTS is not set, so the server's identity is not checked"
           opts+=(-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null)
         fi
-        sshpass -e ssh "${opts[@]}" "$LOGIN@$HOST" "$COMMAND"
+        # The pull credentials go on stdin, never on the command line (which
+        # the server logs and shows in its process list).
+        if [ -n "$REGISTRY_TOKEN" ]; then
+          printf '%s\n%s\n' "$REGISTRY_USER" "$REGISTRY_TOKEN" | sshpass -e ssh "${opts[@]}" "$LOGIN@$HOST" "$COMMAND"
+        else
+          sshpass -e ssh "${opts[@]}" "$LOGIN@$HOST" "$COMMAND" < /dev/null
+        fi

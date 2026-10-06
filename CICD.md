@@ -132,6 +132,7 @@ list, or the web).
 | `DEPLOY_PASSWORD` | the password `setup-deploy-user.sh` printed | all six |
 | `DEPLOY_KNOWN_HOSTS` | the server's host-key line `setup-deploy-user.sh` printed, with the address in front: `<address> ssh-ed25519 AAAA…` | all six (optional, strongly recommended) |
 | `DEPLOY_PORT` | SSH port, only if it isn't 22 | all six (optional) |
+| `KULPAY_DOCKERHUB_PULL_TOKEN` | not needed today; only if Docker Hub's anonymous pull limit ever gets in the way (see below) | all six (optional) |
 
 Which repository needs which:
 
@@ -149,21 +150,25 @@ Notes:
   `DOCKERHUB_USERNAME`/`DOCKERHUB_TOKEN` for the `pavulla` Docker Hub account
   (its older goreleaser workflow on `main`), which would shadow the org's.
   Its `SERVER_*` and Solange's `VPS_*` are not used by these pipelines.
+- **The server needs no token.** The images are public, and so is this
+  repository (the only thing the server fetches from GitHub). No Docker
+  login is stored on the server. Each
+  deploy or rollback sends `KULPAY_DOCKERHUB_USERNAME` and
+  `KULPAY_DOCKERHUB_PULL_TOKEN` over SSH on stdin (never on the command
+  line). The server logs in to a throwaway Docker config for that run and
+  deletes it when the run ends. Without the secret, it pulls anonymously:
+  the images are public, so that works, but under Docker Hub's lower
+  anonymous rate limit. `developerspavs` is a personal account, where Docker
+  Hub can't limit a token to chosen repositories. Use the **Public Repo
+  Read-only** scope: it pulls public images and can't push or delete. On a
+  Docker Hub organisation, an organisation access token can be limited to
+  the `kulpay-*` repositories instead.
 - **No license secret is needed.** kuloffice's license public key is in this
   repository (`deploy/keys/kuloffice-license.pub.base64`). It is public by
   nature, and the same key the server's license was signed for.
 - **Without `DEPLOY_KNOWN_HOSTS`** the runs still work but warn: the server's
   identity isn't checked, so someone impersonating it could capture the
   password.
-
-### On the server (not in GitHub)
-
-The server pulls images with its own Docker Hub login: a personal access
-token with the **Public Repo Read-only** scope, separate from CI's push token.
-Create it on Docker Hub (Account settings → Personal access tokens), then on
-the server, in the deploy folder: `make registry-login`. It stores the login
-for the deploy user (CI's deploys and rollbacks) and for you (`make` by hand).
-Run it again to rotate the token.
 
 ## The server side, briefly
 

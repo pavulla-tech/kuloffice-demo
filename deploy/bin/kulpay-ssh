@@ -28,4 +28,12 @@ case ${args[0]} in
     fi
     ;;
 esac
+# A Docker Hub user and token for this run's pulls, if CI sent them on stdin
+# (two lines). bin/kulpay logs in to a throwaway config and deletes it.
+registry_user="" registry_token=""
+if [[ ! -t 0 ]]; then
+  IFS= read -r -t 5 registry_user || true
+  IFS= read -r -t 5 registry_token || true
+fi
+export KULPAY_REGISTRY_USER=$registry_user KULPAY_REGISTRY_TOKEN=$registry_token
 exec "$deploy_dir/bin/kulpay" "${args[@]}"

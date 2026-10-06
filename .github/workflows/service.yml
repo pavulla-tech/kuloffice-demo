@@ -11,7 +11,8 @@
 #
 # Secrets (organisation-level; see CICD.md): KULPAY_DOCKERHUB_USERNAME,
 # KULPAY_DOCKERHUB_TOKEN, DEPLOY_HOST, DEPLOY_USER, DEPLOY_PASSWORD,
-# DEPLOY_KNOWN_HOSTS (optional, recommended), DEPLOY_PORT if SSH isn't on 22.
+# DEPLOY_KNOWN_HOSTS (optional, recommended), DEPLOY_PORT if SSH isn't on 22,
+# KULPAY_DOCKERHUB_PULL_TOKEN (optional: the server's pulls for this run).
 # The Docker Hub ones have their own names: kuloffice keeps repository-level
 # DOCKERHUB_* for another account, and those would win over the org's.
 name: KulPay service
@@ -78,3 +79,5 @@ jobs:
           user: ${{ secrets.DEPLOY_USER }}
           password: ${{ secrets.DEPLOY_PASSWORD }}
           known-hosts: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+          registry-user: ${{ secrets.KULPAY_DOCKERHUB_USERNAME }}
+          registry-token: ${{ secrets.KULPAY_DOCKERHUB_PULL_TOKEN }}

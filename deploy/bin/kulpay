@@ -129,13 +129,32 @@ lock() {
 
 # ── images ───────────────────────────────────────────────────────────────────
 
+# Pulls with the Docker Hub token CI sent for this run (bin/kulpay-ssh), in a
+# throwaway config deleted when the run ends; nothing is stored on the server.
+# Without one (or by hand), anonymously: the images are public.
+REGISTRY_CONFIG=""
+registry_login() {
+  [[ -n ${KULPAY_REGISTRY_TOKEN:-} && -z $REGISTRY_CONFIG ]] || return 0
+  REGISTRY_CONFIG=$(mktemp -d)
+  trap 'rm -rf "$REGISTRY_CONFIG"' EXIT
+  if printf '%s' "$KULPAY_REGISTRY_TOKEN" |
+    docker --config "$REGISTRY_CONFIG" login -u "${KULPAY_REGISTRY_USER:-}" --password-stdin > /dev/null 2>&1; then
+    say "pulling with this run's Docker Hub token (${KULPAY_REGISTRY_USER:-})"
+  else
+    say "warning: Docker Hub refused this run's token; pulling anonymously"
+    rm -rf "$REGISTRY_CONFIG"; REGISTRY_CONFIG=""
+  fi
+  unset KULPAY_REGISTRY_TOKEN
+}
+
 pull_unit() { # unit tag: fails before anything changes
   local name image
+  registry_login
   for name in $(unit_images "$1"); do
     image=$(env_get "${name}_IMAGE")
     say "pulling $image:$2"
-    docker pull -q "$image:$2" > /dev/null ||
-      die "could not pull $image:$2 (not on Docker Hub, or the server's login is stale: make registry-login)"
+    docker ${REGISTRY_CONFIG:+--config "$REGISTRY_CONFIG"} pull -q "$image:$2" > /dev/null ||
+      die "could not pull $image:$2 (is the tag on Docker Hub?)"
   done
 }
 

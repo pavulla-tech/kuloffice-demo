@@ -240,12 +240,7 @@ first entry, so a rollback can return to it.
    access token that can push to `developerspavs/*`), `DEPLOY_HOST`,
    `DEPLOY_USER`, `DEPLOY_PASSWORD`, `DEPLOY_KNOWN_HOSTS`, and `DEPLOY_PORT`
    if SSH isn't on 22.
-3. **Pulls as an account:** on Docker Hub, create a personal access token
-   with the **Public Repo Read-only** scope, then `make registry-login`
-   (asks for the username and that token, logs in the deploy user and you).
-   Anonymous pulls work, but under a much lower rate limit shared by
-   everything on this server's address.
-4. **Check:** run the Server workflow with `status`.
+3. **Check:** run the Server workflow with `status`.
 
 Before each deploy or rollback the tool brings this checkout up to date
 (`git pull --ff-only`), so compose changes merged here reach the server. A

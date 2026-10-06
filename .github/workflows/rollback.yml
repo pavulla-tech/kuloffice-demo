@@ -62,3 +62,5 @@ jobs:
           user: ${{ secrets.DEPLOY_USER }}
           password: ${{ secrets.DEPLOY_PASSWORD }}
           known-hosts: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+          registry-user: ${{ secrets.KULPAY_DOCKERHUB_USERNAME }}
+          registry-token: ${{ secrets.KULPAY_DOCKERHUB_PULL_TOKEN }}
