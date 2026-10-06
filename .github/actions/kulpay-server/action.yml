@@ -46,17 +46,18 @@ runs:
         opts=(-T -p "$PORT" -o PubkeyAuthentication=no -o PreferredAuthentications=password
               -o ConnectTimeout=20 -o ServerAliveInterval=30 -o ServerAliveCountMax=10)
         if [ -n "$KNOWN" ]; then
-          # Just the key ("ssh-ed25519 AAAA…") is enough: the host goes in front
-          # here, in the form ssh looks up ([host]:port off port 22).
+          # The secret is this one server's key, with or without an address in
+          # front (any address is replaced by DEPLOY_HOST, in the form ssh
+          # looks up: [host]:port off port 22). Comment lines are skipped.
+          HOST=$(printf '%s' "$HOST" | tr -d '[:space:]')
           name=$HOST; [ "$PORT" = 22 ] || name="[$HOST]:$PORT"
           mkdir -p ~/.ssh
-          printf '%s\n' "$KNOWN" | while read -r first rest; do
-            [ -n "$first" ] || continue
-            case $first in
-              ssh-* | ecdsa-* | sk-*) printf '%s %s %s\n' "$name" "$first" "$rest" ;;
-              *) printf '%s %s\n' "$first" "$rest" ;;
-            esac
-          done >> ~/.ssh/known_hosts
+          printf '%s\n' "$KNOWN" | tr -d '\r' | awk -v name="$name" '
+            /^[[:space:]]*#/ { next }
+            { for (i = 1; i < NF; i++) if ($i ~ /^(ssh-|ecdsa-|sk-)/) { print name, $i, $(i + 1); found++; break } }
+            END { exit found ? 0 : 1 }' >> ~/.ssh/known_hosts ||
+            { echo "::error::DEPLOY_KNOWN_HOSTS has no key in it (expected: ssh-ed25519 AAAA…)"; exit 1; }
+          echo "host key: $(awk '{ print $2 }' ~/.ssh/known_hosts | sort -u | tr '\n' ' ')for DEPLOY_HOST"
           opts+=(-o StrictHostKeyChecking=yes)
         else
           echo "::warning::DEPLOY_KNOWN_HOSTS is not set, so the server's identity is not checked"
