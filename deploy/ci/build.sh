@@ -6,14 +6,15 @@
 #
 # Run from anywhere; CI checks this repository out beside the service's.
 set -eu
+unit=${1:?unit}; tag=${2:?tag}; src=${3:?checkout}; push=${4:-}
+# The checkout, from where we were called, before moving into the kit.
+src=$(cd "$src" && pwd)
 cd "$(dirname "$0")/.."
 . ./lib/units.sh
 
-unit=${1:?unit}; tag=${2:?tag}; src=${3:?checkout}; push=${4:-}
 is_unit "$unit" || { echo "unknown unit $unit (one of: $UNITS)" >&2; exit 2; }
 echo "$tag" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$' ||
   { echo "tag $tag is not vMAJOR.MINOR.PATCH[-alphaNN]" >&2; exit 2; }
-src=$(cd "$src" && pwd)
 
 # The example's image names, this unit's tag and checkout.
 env_file=.ci.env
