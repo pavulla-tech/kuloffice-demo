@@ -71,6 +71,10 @@ runs:
           echo "::warning::DEPLOY_KNOWN_HOSTS is not set, so the server's identity is not checked"
           opts+=(-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null)
         fi
+        # What we log in as, without printing the secret: the deploy user is
+        # the only one the server forces into bin/kulpay-ssh.
+        if [ "$LOGIN" = kulpay-deploy ]; then echo "login: kulpay-deploy"
+        else echo "::warning::DEPLOY_USER is not kulpay-deploy (${#LOGIN} characters, starts with '${LOGIN:0:2}'); the server only accepts deploy commands from kulpay-deploy"; fi
         # The pull credentials go on stdin, never on the command line (which
         # the server logs and shows in its process list).
         if [ -n "$REGISTRY_TOKEN" ]; then
