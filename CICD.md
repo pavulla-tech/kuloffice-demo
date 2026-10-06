@@ -130,7 +130,7 @@ list, or the web).
 | `DEPLOY_HOST` | the server's address (IP or hostname) | all six |
 | `DEPLOY_USER` | `kulpay-deploy` (already set) | all six |
 | `DEPLOY_PASSWORD` | the password `setup-deploy-user.sh` printed | all six |
-| `DEPLOY_KNOWN_HOSTS` | the server's host-key line `setup-deploy-user.sh` printed, with the address in front: `<address> ssh-ed25519 AAAA…` | all six (optional, strongly recommended) |
+| `DEPLOY_KNOWN_HOSTS` | the server's public host key, `ssh-ed25519 AAAA…` (on the server: `cut -d' ' -f1,2 /etc/ssh/ssh_host_ed25519_key.pub`); a full known_hosts line with the address in front works too | all six (optional, strongly recommended) |
 | `DEPLOY_PORT` | SSH port, only if it isn't 22 | all six (optional) |
 | `KULPAY_DOCKERHUB_PULL_TOKEN` | not needed today; only if Docker Hub's anonymous pull limit ever gets in the way (see below) | all six (optional) |
 

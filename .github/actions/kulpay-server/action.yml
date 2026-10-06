@@ -24,7 +24,9 @@ inputs:
       Empty: the server pulls anonymously.
     default: ""
   known-hosts:
-    description: The server's known_hosts line (DEPLOY_KNOWN_HOSTS). Without it the host key is not checked.
+    description: >
+      The server's public host key (DEPLOY_KNOWN_HOSTS): "ssh-ed25519 AAAA…",
+      or a whole known_hosts line. Without it the host key is not checked.
     default: ""
 runs:
   using: composite
@@ -44,7 +46,17 @@ runs:
         opts=(-T -p "$PORT" -o PubkeyAuthentication=no -o PreferredAuthentications=password
               -o ConnectTimeout=20 -o ServerAliveInterval=30 -o ServerAliveCountMax=10)
         if [ -n "$KNOWN" ]; then
-          mkdir -p ~/.ssh && printf '%s\n' "$KNOWN" >> ~/.ssh/known_hosts
+          # Just the key ("ssh-ed25519 AAAA…") is enough: the host goes in front
+          # here, in the form ssh looks up ([host]:port off port 22).
+          name=$HOST; [ "$PORT" = 22 ] || name="[$HOST]:$PORT"
+          mkdir -p ~/.ssh
+          printf '%s\n' "$KNOWN" | while read -r first rest; do
+            [ -n "$first" ] || continue
+            case $first in
+              ssh-* | ecdsa-* | sk-*) printf '%s %s %s\n' "$name" "$first" "$rest" ;;
+              *) printf '%s %s\n' "$first" "$rest" ;;
+            esac
+          done >> ~/.ssh/known_hosts
           opts+=(-o StrictHostKeyChecking=yes)
         else
           echo "::warning::DEPLOY_KNOWN_HOSTS is not set, so the server's identity is not checked"
