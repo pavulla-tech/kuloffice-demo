@@ -130,16 +130,19 @@ used instead. Set it in `stack.env`, or for one run on the command line:
 ----
 make up PRESET=web          # the web app here; Keycloak and kuloffice on the server
 make up PRESET=kuloffice    # web and kuloffice here; Keycloak on the server
+make up PRESET=backend      # only kuloffice here (Keycloak and web on the server)
 make up PRESET=local        # everything here (the default stack.env)
 make up WEB=build KULOFFICE=server KEYCLOAK=server   # any mix
 make up KULOFFICE=release WEB=server                 # what's released, run here
 make plan PRESET=kuloffice  # check a combination first
 ----
 
-The supporting services follow: Postgres and the SMS inbox when Keycloak or
-kuloffice run here, MinIO and the file server (`FILESERVER=build` or a tag)
-with a local kuloffice, the realm and demo reviewer with a local Keycloak. The
-token panel always runs; sign it in to whichever Keycloak `make where` lists.
+Only what the choice needs runs. A local kuloffice brings Postgres, MinIO and
+the file server (`FILESERVER=build` or a tag) and its one-shot bootstrap. A
+local Keycloak brings Postgres, its realm setup, the demo reviewer, the SMS
+inbox and the token panel. With Keycloak on the server there is no SMS inbox
+(a local kuloffice's own SMS are only logged) and no token panel unless
+`PANEL=on`. The tiny `net` container always runs: it holds the ports.
 
 *The server never calls this laptop.* That decides what can mix:
 

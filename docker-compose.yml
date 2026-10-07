@@ -185,7 +185,7 @@ services:
   # read it at http://localhost:${SMS_INBOX_PORT}/api/dev/inbox - and the demo
   # page and API the intaka demo app and its Flutter client talk to.
   sms-inbox:
-    profiles: ["base"]
+    profiles: ["inbox"]
     build:
       context: ${INTAKA_DIR:-../keycloak-phone-authenticator}/demo
       dockerfile: backend/Dockerfile
@@ -301,7 +301,7 @@ services:
       net: { condition: service_started }
       db: { condition: service_healthy }
       fileserver: { condition: service_started }
-      sms-inbox: { condition: service_started }
+      sms-inbox: { condition: service_started, required: false }
     environment:
       KULOFFICE_ENVIRONMENT: development
       KULOFFICE_SERVER_HTTP_PORT: ${KULOFFICE_PORT:-18080}
@@ -439,10 +439,12 @@ services:
 
   # Signs numbers in and keeps their tokens fresh: http://localhost:${PANEL_PORT}.
   token-panel:
+    profiles: ["panel"]
     image: python:3.12-alpine
     network_mode: service:net
     restart: unless-stopped
-    # Always here: it signs in to whichever Keycloak you name in it.
+    # With a local Keycloak, or PANEL=on: it signs in to whichever Keycloak you
+    # name in it.
     depends_on:
       realm-setup: { condition: service_completed_successfully, required: false }
     command: ["python3", "/stack/token-panel.py"]
