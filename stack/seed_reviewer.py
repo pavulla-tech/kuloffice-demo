@@ -38,6 +38,16 @@ PERMISSIONS = [
     ("kyc", "approve"), ("kyc", "reject"), ("kyc", "documents.request"), ("kyc", "reopen"),
 ]
 
+# The Conta Pagamento back office (kuloffice docs/PRODUCTS.md, Workforce API):
+# evidence, closure review, fee waivers, parked operations, the catalogue.
+PRODUCT_ROLE = os.environ.get("REVIEWER_PRODUCT_ROLE", "Produtos (local)")
+PRODUCT_PERMISSIONS = [
+    ("product", "read"), ("product_closure", "review"), ("product_fee", "waive"),
+    ("product_operation", "read"), ("product_operation", "retry"),
+    ("product_definition", "read"), ("product_definition", "create"), ("product_definition", "update"),
+    ("product_definition", "publish"), ("product_definition", "retire"),
+]
+
 
 def call(base, method, path, body=None, form=None, auth=None):
     data, headers = None, {}
@@ -119,20 +129,29 @@ def main():
     else:
         sys.exit(f"bind identity failed: {status} {out.get('message', out)}")
 
+    for name, description, permissions in (
+        (ROLE, "KYC reviewers", PERMISSIONS),
+        (PRODUCT_ROLE, "Conta Pagamento back office", PRODUCT_PERMISSIONS),
+    ):
+        ensure_role(kuloffice, op, name, description, permissions)
+    print(f"reviewer ready: {EMAIL}")
+
+
+def ensure_role(kuloffice, op, name, description, permissions):
+    """Creates the role once and grants it to the operator once."""
     roles = must(kuloffice("GET", "/v1/operator-roles"), "list roles").get("roles", [])
-    role = next((r for r in roles if r.get("name") == ROLE), None)
+    role = next((r for r in roles if r.get("name") == name), None)
     if not role:
         role = must(kuloffice("POST", "/v1/operator-roles", {
-            "name": ROLE, "description": "KYC reviewers",
-            "permissions": [{"resource": r, "action": a} for r, a in PERMISSIONS],
-        }), "create role")
-        print(f"role '{ROLE}' created")
+            "name": name, "description": description,
+            "permissions": [{"resource": r, "action": a} for r, a in permissions],
+        }), f"create role {name}")
+        print(f"role '{name}' created")
     held = must(kuloffice("GET", f"/v1/operators/{op['id']}/roles"), "list assignments").get("roles", [])
     if not any(r.get("id") == role["id"] for r in held):
         must(kuloffice("POST", f"/v1/operators/{op['id']}/roles/{role['id']}", {"grant": True, "reason": REASON}),
-             "grant role")
-        print(f"role '{ROLE}' granted")
-    print(f"reviewer ready: {EMAIL}")
+             f"grant role {name}")
+        print(f"role '{name}' granted")
 
 
 def _providers(body):
