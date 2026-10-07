@@ -342,6 +342,11 @@ services:
     networks: [kulpay]
     # The same settings as the stack (the Makefile's ENV_FILE).
     env_file: ["${ENV_FILE:-.env}"]
+    # This checkout's scripts over the image's copies, so a provisioning change
+    # applies with a git pull (the image only changes with intaka's tags).
+    volumes:
+      - ./tools:/tools:ro
+      - ../stack:/stack:ro
     environment:
       # From the stack's network the master realm's admin login is allowed:
       # Keycloak treats private addresses as local (sslRequired=external).
