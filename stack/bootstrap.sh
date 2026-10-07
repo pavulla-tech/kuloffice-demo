@@ -23,9 +23,13 @@ echo
 # goes first. A deployment passes its key (KULOFFICE_LICENSE_KEY); the local
 # stack signs one with the key whose public half the image was built with
 # (make keys).
-if [ "$(status "$api/v1/license")" = "200" ]; then
+# A license on record must also verify with this kuloffice's key: the local
+# stack can switch the same database between a local build (this laptop's
+# key) and a Docker Hub image (the official one). A licensed route says.
+if [ "$(status "$api/v1/license")" = "200" ] && [ "$(status "$api/v1/system/identity-providers")" = "200" ]; then
   echo "license: already active"
 else
+  [ "$(status "$api/v1/license")" != "200" ] || echo "license: the active one doesn't verify with this kuloffice's key; replacing it"
   key=${KULOFFICE_LICENSE_KEY:-}
   [ -n "$key" ] || key=$(kuloffice-license generate --issuer="$LICENSE_ISSUER" --priv-key=/keys/private.pem \
     --issued-to=kuloffice-demo --valid-days=365 --features=basic)

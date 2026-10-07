@@ -71,6 +71,7 @@ services:
       - "127.0.0.1:${PANEL_PORT:-8765}:${PANEL_PORT:-8765}"
 
   db:
+    profiles: ["base"]
     image: postgres:17
     restart: unless-stopped
     environment:
@@ -92,9 +93,11 @@ services:
   # ---- identity -------------------------------------------------------------
 
   keycloak:
+    profiles: ["keycloak"]
     build:
       context: ${INTAKA_DIR:-../keycloak-phone-authenticator}
-    image: ${STACK_NAME:-kulstack}-keycloak:local
+    # The local build, or a tag from Docker Hub (stack/resolve.sh).
+    image: ${KEYCLOAK_REF:-kulstack-keycloak:local}
     network_mode: service:net
     restart: unless-stopped
     depends_on:
@@ -140,6 +143,7 @@ services:
   # script is idempotent, so this runs on every `up`. On the loopback because
   # the master realm refuses plain-HTTP admin logins from anywhere else.
   realm-setup:
+    profiles: ["keycloak"]
     image: python:3.12-alpine
     network_mode: service:net
     depends_on:
@@ -181,6 +185,7 @@ services:
   # read it at http://localhost:${SMS_INBOX_PORT}/api/dev/inbox - and the demo
   # page and API the intaka demo app and its Flutter client talk to.
   sms-inbox:
+    profiles: ["base"]
     build:
       context: ${INTAKA_DIR:-../keycloak-phone-authenticator}/demo
       dockerfile: backend/Dockerfile
@@ -203,6 +208,7 @@ services:
   # ---- files ------------------------------------------------------------------
 
   minio:
+    profiles: ["kuloffice"]
     image: minio/minio:RELEASE.2024-08-17T01-24-54Z
     restart: unless-stopped
     command: ["server", "/data", "--console-address", ":9001"]
@@ -223,6 +229,7 @@ services:
   # The two buckets kuloffice uses. Images wait in the pending bucket until a
   # submission is accepted, and its lifecycle rule removes what never is.
   minio-init:
+    profiles: ["kuloffice"]
     image: minio/mc:RELEASE.2024-08-17T11-33-50Z
     depends_on:
       minio: { condition: service_healthy }
@@ -246,6 +253,7 @@ services:
 
   # boquisso-fileserver: the HTTP API kuloffice talks to, in front of MinIO.
   fileserver:
+    profiles: ["kuloffice"]
     build:
       context: ${FILESERVER_DIR:-../boquisso-fileserver}
       dockerfile_inline: |
@@ -262,7 +270,7 @@ services:
         COPY --from=build /out/boquisso /usr/local/bin/boquisso
         USER boquisso
         ENTRYPOINT ["boquisso"]
-    image: ${STACK_NAME:-kulstack}-fileserver:local
+    image: ${FILESERVER_REF:-kulstack-fileserver:local}
     restart: unless-stopped
     depends_on:
       minio-init: { condition: service_completed_successfully }
@@ -278,8 +286,9 @@ services:
   # ---- kuloffice --------------------------------------------------------------
 
   kuloffice:
+    profiles: ["kuloffice"]
     build: *kuloffice-build
-    image: ${STACK_NAME:-kulstack}-kuloffice:local
+    image: ${KULOFFICE_REF:-kulstack-kuloffice:local}
     network_mode: service:net
     restart: unless-stopped
     # Anything else kuloffice reads (KULOFFICE_*), e.g. MiniAiLive's endpoints.
@@ -303,10 +312,11 @@ services:
       KULOFFICE_ADMIN_EMAIL: ${KULOFFICE_ADMIN_EMAIL:-admin@kulpay.local}
       KULOFFICE_ADMIN_PASSWORD: ${KULOFFICE_ADMIN_PASSWORD:-localadmin}
       # Sets the PIN at the end of onboarding (POST /onboarding/pin).
-      KULOFFICE_KEYCLOAK_BASE_URL: http://localhost:${KC_PORT:-8080}/auth
-      KULOFFICE_KEYCLOAK_REALM: demo
-      KULOFFICE_KEYCLOAK_CLIENT_ID: demo-backend
-      KULOFFICE_KEYCLOAK_CLIENT_SECRET: demo-backend-secret
+      # The local demo realm, or the server's (KEYCLOAK=server).
+      KULOFFICE_KEYCLOAK_BASE_URL: ${KC_PUBLIC:-http://localhost:8080/auth}
+      KULOFFICE_KEYCLOAK_REALM: ${KC_REALM:-demo}
+      KULOFFICE_KEYCLOAK_CLIENT_ID: ${KC_BACKEND_CLIENT:-demo-backend}
+      KULOFFICE_KEYCLOAK_CLIENT_SECRET: ${KC_BACKEND_SECRET:-demo-backend-secret}
       KULOFFICE_KEYCLOAK_ONBOARDING_ROLE: onboarding_pending
       # The dev inbox, never the real gateway (whose credentials are the
       # config defaults).
@@ -322,19 +332,27 @@ services:
       KULOFFICE_OPERATOR_REVIEW_SYNC: "true"
       # false: no MiniAiLive calls at all; a reviewer transcribes instead.
       KULOFFICE_BIOMETRICS_ENABLED: ${BIOMETRICS_ENABLED:-true}
+      # QR codes through the server's Solange, with SOLANGE_API_KEY (off
+      # without it). Its scan webhooks can't reach this laptop.
+      KULOFFICE_SOLANGE_BASE_URL: ${SOLANGE_BASE:-}
+      KULOFFICE_SOLANGE_API_KEY: ${SOLANGE_KEY:-}
+      KULOFFICE_SOLANGE_WEB_URL: ${WEB_URL:-http://localhost:3000}
+      KULOFFICE_SOLANGE_PUBLIC_API_URL: http://localhost:${KULOFFICE_PORT:-18080}
 
   # Activates the license and registers Keycloak as kuloffice's identity
   # provider, skipping whichever is already done. Re-run with `make bootstrap`.
   bootstrap:
     # kuloffice's image, which has kuloffice-license and curl. Built by the
     # kuloffice service; a second build block here would build it twice.
-    image: ${STACK_NAME:-kulstack}-kuloffice:local
-    pull_policy: never
+    # The local kuloffice build, or plain curl when kuloffice comes from Docker
+    # Hub (its license is then the server's, KULOFFICE_LICENSE_KEY).
+    image: ${BOOTSTRAP_REF:-kulstack-kuloffice:local}
+    profiles: ["kuloffice"]
     network_mode: service:net
     user: root
     depends_on:
       kuloffice: { condition: service_started }
-      realm-setup: { condition: service_completed_successfully }
+      realm-setup: { condition: service_completed_successfully, required: false }
     entrypoint: ["sh", "/stack/bootstrap.sh"]
     volumes:
       - ./stack/bootstrap.sh:/stack/bootstrap.sh:ro
@@ -344,19 +362,23 @@ services:
       KULOFFICE_ADMIN_EMAIL: ${KULOFFICE_ADMIN_EMAIL:-admin@kulpay.local}
       KULOFFICE_ADMIN_PASSWORD: ${KULOFFICE_ADMIN_PASSWORD:-localadmin}
       LICENSE_ISSUER: ${LICENSE_ISSUER:-pavulla.com}
-      IDP_ISSUER_URL: http://localhost:${KC_PORT:-8080}/auth/realms/demo
+      KULOFFICE_LICENSE_KEY: ${KULOFFICE_LICENSE_KEY:-}
+      IDP_ISSUER_URL: ${KC_ISSUER:-http://localhost:8080/auth/realms/demo}
       # Web and panel tokens carry this client in their audience (the realm's
       # aud-demo-backend mapper), which is what kuloffice checks.
-      IDP_CLIENT_ID: demo-backend
-      IDP_CLIENT_SECRET: demo-backend-secret
+      IDP_CLIENT_ID: ${KC_BACKEND_CLIENT:-demo-backend}
+      IDP_CLIENT_SECRET: ${KC_BACKEND_SECRET:-demo-backend-secret}
       # Staff: the workforce realm, its own provider (no shared issuer with customers).
-      WORKFORCE_ISSUER_URL: http://localhost:${KC_PORT:-8080}/auth/realms/workforce
+      WORKFORCE_ISSUER_URL: ${KC_WORKFORCE_ISSUER:-http://localhost:8080/auth/realms/workforce}
       WORKFORCE_CLIENT_ID: kuloffice
-      WORKFORCE_CLIENT_SECRET: ${WORKFORCE_API_SECRET:-kuloffice-workforce-secret}
+      WORKFORCE_CLIENT_SECRET: ${KC_WORKFORCE_SECRET:-kuloffice-workforce-secret}
 
   # Makes the workforce realm's demo user a reviewer: operator, identity
   # binding and role. Before anyone signs in as them; see stack/seed_reviewer.py.
   reviewer-seed:
+    # A local kuloffice, with the local Keycloak or (SERVER_KC_ADMIN_PASSWORD)
+    # the server's: there it only looks your staff account up.
+    profiles: ["seed"]
     image: python:3.12-alpine
     network_mode: service:net
     depends_on:
@@ -365,12 +387,14 @@ services:
       - ./stack/seed_reviewer.py:/stack/seed_reviewer.py:ro
     command: ["python3", "/stack/seed_reviewer.py"]
     environment:
-      KEYCLOAK_URL: http://localhost:${KC_PORT:-8080}/auth
-      WORKFORCE_ISSUER: http://localhost:${KC_PORT:-8080}/auth/realms/workforce
+      KEYCLOAK_URL: ${KC_PUBLIC:-http://localhost:8080/auth}
+      WORKFORCE_ISSUER: ${KC_WORKFORCE_ISSUER:-http://localhost:8080/auth/realms/workforce}
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${KC_ADMIN_USER:-admin}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KC_ADMIN_PASSWORD:-admin}
       KULOFFICE_URL: http://localhost:${KULOFFICE_PORT:-18080}
       KULOFFICE_ADMIN_EMAIL: ${KULOFFICE_ADMIN_EMAIL:-admin@kulpay.local}
       KULOFFICE_ADMIN_PASSWORD: ${KULOFFICE_ADMIN_PASSWORD:-localadmin}
-      REVIEWER_EMAIL: ${REVIEWER_EMAIL:-reviewer@kulpay.local}
+      REVIEWER_EMAIL: ${SEED_EMAIL:-reviewer@kulpay.local}
 
   # ---- clients ----------------------------------------------------------------
 
@@ -396,19 +420,21 @@ services:
         COPY --from=build --chown=node:node /app ./
         USER node
         CMD ["node_modules/.bin/next", "start"]
-    image: ${STACK_NAME:-kulstack}-web:local
+    image: ${WEB_REF:-kulstack-web:local}
+    profiles: ["web"]
     network_mode: service:net
     restart: unless-stopped
     depends_on:
-      kuloffice: { condition: service_started }
-      realm-setup: { condition: service_completed_successfully }
+      kuloffice: { condition: service_started, required: false }
+      realm-setup: { condition: service_completed_successfully, required: false }
     environment:
       PORT: ${WEB_PORT:-3000}
       KULPAY_WEB_URL: http://localhost:${WEB_PORT:-3000}
-      KULPAY_KEYCLOAK_ISSUER: http://localhost:${KC_PORT:-8080}/auth/realms/demo
+      # The local demo realm or the server's, the local kuloffice or core.
+      KULPAY_KEYCLOAK_ISSUER: ${KC_ISSUER:-http://localhost:8080/auth/realms/demo}
       KULPAY_KEYCLOAK_CLIENT_ID: kulpay-web
       KULPAY_KEYCLOAK_PASSKEY_CLIENT_ID: kulpay-web-passkey
-      KULPAY_API_URL: http://localhost:${KULOFFICE_PORT:-18080}
+      KULPAY_API_URL: ${API_URL:-http://localhost:18080}
       KULPAY_SESSION_SECRET: ${KULPAY_SESSION_SECRET:-}
 
   # Signs numbers in and keeps their tokens fresh: http://localhost:${PANEL_PORT}.
@@ -416,8 +442,9 @@ services:
     image: python:3.12-alpine
     network_mode: service:net
     restart: unless-stopped
+    # Always here: it signs in to whichever Keycloak you name in it.
     depends_on:
-      realm-setup: { condition: service_completed_successfully }
+      realm-setup: { condition: service_completed_successfully, required: false }
     command: ["python3", "/stack/token-panel.py"]
     volumes:
       - ${INTAKA_DIR:-../keycloak-phone-authenticator}/demo/token-panel:/src:ro
@@ -426,7 +453,7 @@ services:
     environment:
       PANEL_PORT: ${PANEL_PORT:-8765}
       INBOX_URL: http://sms-inbox:8080/api/dev/inbox
-      PANEL_API_BASES: http://localhost:${KULOFFICE_PORT:-18080}
+      PANEL_API_BASES: ${API_URL:-http://localhost:18080}
 
 volumes:
   db-data:

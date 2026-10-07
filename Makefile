@@ -3,9 +3,14 @@
 # and clients, MinIO buckets, license, identity provider - so it is ready to
 # sign in to.
 #
+# Each of Keycloak, kuloffice and the web app can instead come from Docker Hub
+# (a tag, or `release`) or be the deployed one (`server`): KEYCLOAK, KULOFFICE,
+# WEB in stack.env, or for one run `make up WEB=build KULOFFICE=server …`, or
+# PRESET=web|kuloffice|local. stack/resolve.sh works out the rest.
+#
 # Settings are in stack.env (created from stack.env.example on first use).
 
-.PHONY: help up down restart rebuild logs ps urls bootstrap realm buckets reviewer review kuloffice sms ussd-test db psql \
+.PHONY: help up plan where down restart rebuild logs ps urls bootstrap realm buckets reviewer review kuloffice sms ussd-test db psql \
         keys license config clean legacy-stop
 
 # Creates stack.env first if it is missing, with its own web session secret.
@@ -34,14 +39,34 @@ KEYS := .stack/keys
 
 # -f names the file so that the untracked docker-compose.override.yml (the
 # older two-project wiring) is never merged in.
+# .stack/resolved.env (stack/resolve.sh, on every make up) says what runs here
+# and wires it to what doesn't; its COMPOSE_PROFILES picks the services.
+RESOLVED := .stack/resolved.env
 COMPOSE = LICENSE_PUBLIC_KEY="$$(cat $(KEYS)/public.pem.base64 2>/dev/null)" \
-	docker compose -p $(STACK_NAME) -f docker-compose.yml --env-file stack.env
+	COMPOSE_PROFILES="$$(sed -n 's/^COMPOSE_PROFILES=//p' $(RESOLVED) 2>/dev/null)" \
+	docker compose -p $(STACK_NAME) -f docker-compose.yml --env-file stack.env \
+	$$([ -f $(RESOLVED) ] && echo --env-file $(RESOLVED))
+
+# Where each switchable service comes from (see stack.env.example). Passed to
+# stack/resolve.sh with the settings it needs.
+RESOLVE_VARS = KEYCLOAK PRESET KULOFFICE WEB FILESERVER STACK_NAME STACK_BIND KC_PORT KULOFFICE_PORT KULOFFICE_GRPC_PORT \
+	WEB_PORT PANEL_PORT SMS_INBOX_PORT FILESERVER_PORT MINIO_PORT MINIO_CONSOLE_PORT DB_PORT \
+	INTAKA_DIR KULOFFICE_DIR WEB_DIR FILESERVER_DIR WORKFORCE_API_SECRET REVIEWER_EMAIL \
+	SERVER_KEYCLOAK_URL SERVER_KULOFFICE_URL SERVER_WEB_URL SERVER_REALM SERVER_ADMIN_CLIENT_SECRET \
+	SERVER_WORKFORCE_API_SECRET SERVER_LICENSE_KEY SERVER_KC_ADMIN_USER SERVER_KC_ADMIN_PASSWORD \
+	SERVER_REVIEWER_EMAIL SOLANGE_URL SOLANGE_API_KEY
 
 # A service name, for the targets that take one: make logs S=kuloffice
 S ?=
 
 help:
-	@echo "make up              build, start and configure the whole stack"
+	@echo "make up              build, start and configure the stack (what stack.env says is local)"
+	@echo "make up PRESET=web|kuloffice|local    web: only the web app here; kuloffice: web + kuloffice"
+	@echo "                     here, Keycloak on the server; local: everything here"
+	@echo "make up WEB=build KULOFFICE=server KEYCLOAK=v0.1.0-alpha03 …   any mix, for one run"
+	@echo "                     (build | a Docker Hub tag | release | server)"
+	@echo "make plan [X=…]      what make up would run here and use on the server (starts nothing)"
+	@echo "make where           what this run uses, and where"
 	@echo "make down            stop it (data is kept)"
 	@echo "make restart [S=x]   restart everything, or one service"
 	@echo "make rebuild [S=x]   rebuild from the checkouts and restart (after a code change)"
@@ -80,28 +105,51 @@ $(KEYS)/private.pem:
 	@openssl base64 -A -in $(KEYS)/public.pem > $(KEYS)/public.pem.base64
 	@echo "Generated the license key pair in $(KEYS)"
 
-up: stack.env keys
-	$(COMPOSE) up -d --build
-	@echo "Configuring kuloffice…"
-	@id=$$($(COMPOSE) ps -aq bootstrap); \
-		until [ "$$(docker inspect -f '{{.State.Status}}' $$id)" = "exited" ]; do sleep 1; done; \
-		$(COMPOSE) logs --no-log-prefix bootstrap; \
-		code=$$(docker inspect -f '{{.State.ExitCode}}' $$id); \
-		if [ "$$code" != "0" ]; then echo "bootstrap failed (exit $$code)" >&2; exit 1; fi
-	@id=$$($(COMPOSE) ps -aq reviewer-seed); \
-		until [ "$$(docker inspect -f '{{.State.Status}}' $$id)" = "exited" ]; do sleep 1; done; \
-		$(COMPOSE) logs --no-log-prefix reviewer-seed; \
-		code=$$(docker inspect -f '{{.State.ExitCode}}' $$id); \
-		if [ "$$code" != "0" ]; then echo "reviewer seeding failed (exit $$code)" >&2; exit 1; fi
-	@$(MAKE) --no-print-directory urls
+# What make up would run here and use on the server, without starting it.
+plan: stack.env
+	@$(foreach v,$(RESOLVE_VARS),$(if $(value $(v)),$(v)="$($(v))") )sh stack/resolve.sh
+
+up: stack.env keys plan
+	@set -a; . ./$(RESOLVED); set +a; \
+		if [ -n "$$STACK_STOP" ]; then $(COMPOSE) --profile '*' stop $$STACK_STOP 2>/dev/null; \
+			$(COMPOSE) --profile '*' rm -f $$STACK_STOP >/dev/null 2>&1; fi; \
+		if [ -n "$$STACK_BUILD" ]; then $(COMPOSE) --profile '*' build $$STACK_BUILD; fi
+	$(COMPOSE) up -d --no-build
+	@set -a; . ./$(RESOLVED); set +a; \
+		wait_for() { id=$$($(COMPOSE) ps -aq $$1); [ -n "$$id" ] || return 0; \
+			until [ "$$(docker inspect -f '{{.State.Status}}' $$id)" = "exited" ]; do sleep 1; done; \
+			$(COMPOSE) logs --no-log-prefix $$1; \
+			code=$$(docker inspect -f '{{.State.ExitCode}}' $$id); \
+			if [ "$$code" != "0" ]; then echo "$$1 failed (exit $$code)" >&2; exit 1; fi; }; \
+		if [ "$$STACK_KULOFFICE_LOCAL" = yes ]; then echo "Configuring kuloffice…"; wait_for bootstrap; fi; \
+		if [ "$$STACK_SEED" = yes ]; then wait_for reviewer-seed; fi
+	@$(MAKE) --no-print-directory where
+
+# What the last make up runs here and what it uses on the server.
+where:
+	@[ -f .stack/where.txt ] || { echo "nothing yet: make up" >&2; exit 1; }
+	@echo ""
+	@cat .stack/where.txt
+	@echo "token     http://localhost:$(PANEL_PORT)   panel; sign in to whichever Keycloak above"
+	@set -a; . ./$(RESOLVED); set +a; case ",$$COMPOSE_PROFILES," in *,base,*) \
+		echo "sms       http://localhost:$(SMS_INBOX_PORT)/api/dev/inbox   codes from this laptop's Keycloak and kuloffice (make sms)"; \
+		echo "postgres  localhost:$(DB_PORT)   kuloffice / kuloffice (make psql)";; esac
+	@set -a; . ./$(RESOLVED); set +a; case ",$$COMPOSE_PROFILES," in *,keycloak,*) \
+		echo "admin     http://localhost:$(KC_PORT)/auth/admin   admin / admin   realm: demo";; esac
+	@set -a; . ./$(RESOLVED); set +a; case ",$$COMPOSE_PROFILES," in *,seed,*) \
+		echo "reviewer  $$SEED_EMAIL (token panel, Reviewer card)";; esac
 
 down:
-	$(COMPOSE) down
+	$(COMPOSE) --profile '*' down
 
 restart:
 	$(COMPOSE) restart $(S)
 
+# Only what is built here; a tag or the server has nothing to rebuild.
 rebuild: stack.env keys
+	@set -a; . ./$(RESOLVED); set +a; for s in $(or $(S),$$STACK_BUILD); do \
+		case " $$STACK_BUILD " in *" $$s "*) ;; *) case $$s in keycloak|kuloffice|web|fileserver) \
+			echo "$$s isn't built here this run (make where)" >&2; exit 1;; esac;; esac; done
 	$(COMPOSE) up -d --build $(S)
 
 logs:
@@ -110,16 +158,8 @@ logs:
 ps:
 	$(COMPOSE) ps -a
 
-urls:
-	@echo ""
-	@echo "Web app          http://localhost:$(WEB_PORT)"
-	@echo "Token panel      http://localhost:$(PANEL_PORT)   reviewer: $(REVIEWER_EMAIL) / $(REVIEWER_PASSWORD) (Reviewer card)"
-	@echo "kuloffice API    http://localhost:$(KULOFFICE_PORT)   admin: $(KULOFFICE_ADMIN_EMAIL) / $(KULOFFICE_ADMIN_PASSWORD) (Basic)"
-	@echo "Keycloak         http://localhost:$(KC_PORT)/auth/admin   admin / admin   realm: demo"
-	@echo "Demo backend     http://localhost:$(SMS_INBOX_PORT)   intaka's demo page; SMS inbox at /api/dev/inbox (make sms)"
-	@echo "MinIO console    http://localhost:$(MINIO_CONSOLE_PORT)   $(MINIO_ROOT_USER) / $(MINIO_ROOT_PASSWORD)"
-	@echo "File server      http://localhost:$(FILESERVER_PORT)"
-	@echo "Postgres         localhost:$(DB_PORT)   kuloffice / kuloffice (make psql)"
+# The older name for `make where`.
+urls: where
 
 bootstrap:
 	$(COMPOSE) up --no-deps --force-recreate bootstrap
@@ -171,7 +211,7 @@ config: stack.env
 	$(COMPOSE) config
 
 clean:
-	$(COMPOSE) down -v --remove-orphans
+	$(COMPOSE) --profile '*' down -v --remove-orphans
 
 # The setup this replaces ran as two compose projects - intaka's demo
 # (phoneauth-*) and this repository's (kuloffice, kuloffice-db) - on the same

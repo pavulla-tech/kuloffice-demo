@@ -92,12 +92,14 @@ change: it rebuilds what changed and restarts it.
 
 [cols="1,3"]
 |===
-|`make up` |Build, start and configure everything
+|`make up [PRESET=…] [KEYCLOAK=… KULOFFICE=… WEB=…]` |Build or pull, start and configure what runs here (see "Local, Docker Hub or server")
+|`make plan [same options]` |What `make up` would run here and use on the server, without starting anything
+|`make where` |What the last `make up` runs here, and the server addresses it uses
 |`make down` |Stop the stack (data is kept)
 |`make rebuild [S=service]` |Rebuild from the checkouts and restart
 |`make restart [S=service]` |Restart
 |`make logs [S=service]` |Follow logs
-|`make ps` / `make urls` |What is running / where to find it
+|`make ps` |What is running
 |`make sms` |Print the SMS inbox
 |`make reviewer` |Re-seed the demo reviewer (operator, identity, role)
 |`make review ACCOUNT=acc_...` |Decide an account's KYC as the demo reviewer (`OUTCOME=approve\|reject\|request_documents`, `MESSAGE=`, `DOCS=`)
@@ -109,6 +111,62 @@ change: it rebuilds what changed and restarts it.
 |`make clean` |Remove the containers and volumes (keys and `stack.env` stay)
 |`make legacy-stop` |Stop the older `demo` + `kuloffice-demo` containers, which use the same ports
 |===
+
+== Local, Docker Hub or server
+
+Keycloak, kuloffice and the web app can each run here from your checkout, run
+here from a Docker Hub image, or not run here at all, the deployed one being
+used instead. Set it in `stack.env`, or for one run on the command line:
+
+[cols="1,3"]
+|===
+|`build` |Built here from its sibling checkout (`*_DIR`), as before
+|`v0.1.0-alpha03` |That tag of `developerspavs/kulpay-*`, pulled and run here (amd64: emulated, slower, on Apple Silicon)
+|`release` |The newest `v*` tag on Docker Hub, run here
+|`server` |Not run here; the deployed one is used (`SERVER_*` settings)
+|===
+
+[source,sh]
+----
+make up PRESET=web          # the web app here; Keycloak and kuloffice on the server
+make up PRESET=kuloffice    # web and kuloffice here; Keycloak on the server
+make up PRESET=local        # everything here (the default stack.env)
+make up WEB=build KULOFFICE=server KEYCLOAK=server   # any mix
+make up KULOFFICE=release WEB=server                 # what's released, run here
+make plan PRESET=kuloffice  # check a combination first
+----
+
+The supporting services follow: Postgres and the SMS inbox when Keycloak or
+kuloffice run here, MinIO and the file server (`FILESERVER=build` or a tag)
+with a local kuloffice, the realm and demo reviewer with a local Keycloak. The
+token panel always runs; sign it in to whichever Keycloak `make where` lists.
+
+*The server never calls this laptop.* That decides what can mix:
+
+* *kuloffice on the server with Keycloak here:* refused. The server's
+  kuloffice only accepts the server's tokens.
+* *The web app here, kuloffice on the server:* you work on the server's real
+  data. The server's Keycloak must accept `http://localhost:<WEB_PORT>`: its
+  `DEV_WEB_ORIGINS` (default `http://localhost:3000`), applied by
+  Actions → Server → `provision`.
+* *kuloffice here, Keycloak on the server:* you sign in with your server
+  account, but this kuloffice has its own database, so you onboard again here;
+  the server's data is never touched. Needs `SERVER_ADMIN_CLIENT_SECRET` and
+  `SERVER_WORKFORCE_API_SECRET` (the server's `ADMIN_CLIENT_SECRET` and
+  `WORKFORCE_API_SECRET`). To make your staff account a reviewer here, also
+  `SERVER_KC_ADMIN_PASSWORD` and `SERVER_REVIEWER_EMAIL`.
+* *QR codes with a local kuloffice:* through the server's Solange, with
+  `SOLANGE_API_KEY` (a test key from Solange's console). Its scan webhooks
+  can't reach this laptop.
+* *The deployed web app* never uses anything running here.
+
+A kuloffice image from Docker Hub only takes the official license: set
+`SERVER_LICENSE_KEY` (the server's `KULOFFICE_LICENSE_KEY`). A local build
+signs its own (`make keys`). Switching one database between the two is fine:
+bootstrap replaces a license that doesn't verify.
+
+To try a combination beside your usual stack, give it its own name and ports,
+e.g. `make up PRESET=web STACK_NAME=kultest WEB_PORT=3000 KC_PORT=38080 …`.
 
 == How it fits together
 
