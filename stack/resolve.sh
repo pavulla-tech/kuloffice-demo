@@ -125,10 +125,18 @@ if local_ "$KULOFFICE"; then
   if local_ "$KEYCLOAK" || { [ -n "$KC_ADMIN_PASSWORD" ] && [ -n "$SEED_EMAIL" ]; }; then SEED=yes; fi
 fi
 
-# QR codes for a local kuloffice, through the server's Solange (optional).
-SOLANGE_BASE= SOLANGE_KEY=
+# QR codes for a local kuloffice: the server's Solange with SOLANGE_API_KEY,
+# otherwise a local one. Its key and webhook secret come from
+# stack/solange-setup.sh (.stack/solange.env), issued on the first make up.
+SOLANGE_BASE= SOLANGE_KEY= SOLANGE_WEBHOOK_SECRETS= QR=off
 if local_ "$KULOFFICE" && [ -n "${SOLANGE_API_KEY:-}" ]; then
-  SOLANGE_BASE=${SOLANGE_URL:-https://qr.kulpay.pavulla.com} SOLANGE_KEY=$SOLANGE_API_KEY
+  SOLANGE_BASE=${SOLANGE_URL:-https://qr.kulpay.pavulla.com} SOLANGE_KEY=$SOLANGE_API_KEY QR=server
+elif local_ "$KULOFFICE"; then
+  QR=local SOLANGE_BASE=http://localhost:${SOLANGE_PORT:-8094}
+  if [ -f .stack/solange.env ]; then
+    SOLANGE_KEY=$(sed -n 's/^SOLANGE_KEY=//p' .stack/solange.env)
+    SOLANGE_WEBHOOK_SECRETS=$(sed -n 's/^SOLANGE_WEBHOOK_SECRETS=//p' .stack/solange.env)
+  fi
 fi
 
 # ── profiles: what runs here; what to stop and build ─────────────────────────
@@ -140,6 +148,7 @@ if local_ "$KEYCLOAK"; then add _ keycloak; add _ base; add _ inbox; add _ panel
 if [ "${PANEL:-}" = on ]; then add _ panel; fi
 case " $profiles " in *" panel "*) ;; *) stop="$stop token-panel" ;; esac
 if local_ "$KULOFFICE"; then add _ kuloffice; add _ base; else stop="$stop kuloffice bootstrap fileserver minio minio-init"; fi
+if [ "$QR" = local ]; then add _ qr; else stop="$stop solange solange-migrate solange-db"; fi
 if local_ "$WEB"; then add _ web; else stop="$stop web"; fi
 if [ "$SEED" = yes ]; then add _ seed; else stop="$stop reviewer-seed"; fi
 # The review portal needs the local staff realm and kuloffice, and its checkout.
@@ -198,10 +207,12 @@ API_URL=$API_URL
 WEB_URL=$WEB_URL
 SOLANGE_BASE=$SOLANGE_BASE
 SOLANGE_KEY=$SOLANGE_KEY
+SOLANGE_WEBHOOK_SECRETS=$SOLANGE_WEBHOOK_SECRETS
+STACK_QR=$QR
 EOF
 # Ports and the image prefix, so `make up WEB_PORT=…` reaches compose too.
 for v in STACK_NAME STACK_BIND KC_PORT KULOFFICE_PORT KULOFFICE_GRPC_PORT WEB_PORT PANEL_PORT SMS_INBOX_PORT \
-  FILESERVER_PORT MINIO_PORT MINIO_CONSOLE_PORT DB_PORT; do
+  FILESERVER_PORT MINIO_PORT MINIO_CONSOLE_PORT DB_PORT PORTAL_PORT SOLANGE_PORT; do
   eval "val=\${$v:-}"
   [ -z "$val" ] || printf '%s=%s\n' "$v" "$val" >> .stack/resolved.env
 done
@@ -216,7 +227,11 @@ chmod 600 .stack/resolved.env
   fi
   if local_ "$KULOFFICE"; then
     printf '%-10s %-38s %s\n' fileserver "http://localhost:${FILESERVER_PORT:-8082}" "$(source_of fileserver "$FILESERVER" "${FILESERVER_DIR:-../boquisso-fileserver}")"
-    printf '%-10s %-38s %s\n' solange "${SOLANGE_BASE:-off}" "${SOLANGE_BASE:+server (SOLANGE_API_KEY)}"
+    case $QR in
+      local) printf '%-10s %-38s %s\n' solange "$SOLANGE_BASE" "Docker Hub (${SOLANGE_TAG:-2026.10.03-1}), test mode" ;;
+      server) printf '%-10s %-38s %s\n' solange "$SOLANGE_BASE" "server (SOLANGE_API_KEY)" ;;
+      *) printf '%-10s %-38s %s\n' solange off "" ;;
+    esac
   fi
 } > .stack/where.txt
 
@@ -227,7 +242,7 @@ if local_ "$KULOFFICE" && ! local_ "$KEYCLOAK"; then
   note "you sign in with your server account; this kuloffice has its own database, so you onboard again here"
   [ "$SEED" = yes ] || note "no reviewer here: set SERVER_KC_ADMIN_PASSWORD and SERVER_REVIEWER_EMAIL to make your staff account one"
 fi
-if local_ "$KULOFFICE" && [ -n "$SOLANGE_BASE" ]; then note "QR codes through the server's Solange: its scan webhooks can't reach this laptop"; fi
+if [ "$QR" = server ]; then note "QR codes through the server's Solange: its scan webhooks can't reach this laptop"; fi
 if ! local_ "$WEB" && { local_ "$KULOFFICE" || local_ "$KEYCLOAK"; }; then note "the deployed web app never calls this laptop: call the API here (PANEL=on adds the token panel)"; fi
 if local_ "$KULOFFICE" && ! local_ "$KEYCLOAK"; then note "no SMS inbox: this kuloffice's own SMS (approvals) are only logged"; fi
 if ! local_ "$KEYCLOAK" && local_ "$WEB"; then note "the server's Keycloak must accept http://localhost:$WEB_PORT (DEV_WEB_ORIGINS on the server, applied by Server → provision)"; fi

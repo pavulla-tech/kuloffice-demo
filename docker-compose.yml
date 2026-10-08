@@ -68,6 +68,7 @@ services:
       - "${STACK_BIND:-127.0.0.1}:${KULOFFICE_GRPC_PORT:-50051}:${KULOFFICE_GRPC_PORT:-50051}"
       - "${STACK_BIND:-127.0.0.1}:${WEB_PORT:-3000}:${WEB_PORT:-3000}"
       - "${STACK_BIND:-127.0.0.1}:${PORTAL_PORT:-3100}:${PORTAL_PORT:-3100}"
+      - "${STACK_BIND:-127.0.0.1}:${SOLANGE_PORT:-8094}:${SOLANGE_PORT:-8094}"
       # The panel holds live tokens: loopback only, whatever STACK_BIND says.
       - "127.0.0.1:${PANEL_PORT:-8765}:${PANEL_PORT:-8765}"
 
@@ -250,7 +251,7 @@ services:
       - -ec
       - |
         mc alias set local http://minio:9000 "$$MINIO_ROOT_USER" "$$MINIO_ROOT_PASSWORD" >/dev/null
-        mc mb --ignore-existing "local/$$KYC_BUCKET" "local/$$PENDING_BUCKET"
+        mc mb --ignore-existing "local/$$KYC_BUCKET" "local/$$PENDING_BUCKET" local/logos
         if mc ilm rule ls "local/$$PENDING_BUCKET" >/dev/null 2>&1; then
           echo "lifecycle rule on $$PENDING_BUCKET already set"
         else
@@ -338,12 +339,60 @@ services:
       KULOFFICE_OPERATOR_REVIEW_SYNC: "true"
       # false: no MiniAiLive calls at all; a reviewer transcribes instead.
       KULOFFICE_BIOMETRICS_ENABLED: ${BIOMETRICS_ENABLED:-true}
-      # QR codes through the server's Solange, with SOLANGE_API_KEY (off
-      # without it). Its scan webhooks can't reach this laptop.
+      # QR codes: the local Solange (stack/solange-setup.sh issues the key and
+      # the webhook), or the server's with SOLANGE_API_KEY. Off when neither.
       KULOFFICE_SOLANGE_BASE_URL: ${SOLANGE_BASE:-}
       KULOFFICE_SOLANGE_API_KEY: ${SOLANGE_KEY:-}
+      KULOFFICE_SOLANGE_WEBHOOK_SECRETS: ${SOLANGE_WEBHOOK_SECRETS:-}
       KULOFFICE_SOLANGE_WEB_URL: ${WEB_URL:-http://localhost:3000}
       KULOFFICE_SOLANGE_PUBLIC_API_URL: http://localhost:${KULOFFICE_PORT:-18080}
+
+  # ---- Solange (QR codes), the same image as the server's ---------------------
+  # Its database beside kuloffice's, made once (the init script only runs on a
+  # new volume).
+  solange-db:
+    profiles: ["qr"]
+    image: postgres:17
+    depends_on:
+      db: { condition: service_healthy }
+    environment:
+      PGPASSWORD: kuloffice
+    entrypoint:
+      - sh
+      - -ec
+      - |
+        q() { psql -h db -U kuloffice -d postgres -tAc "$$1"; }
+        [ "$$(q "SELECT 1 FROM pg_roles WHERE rolname='solange'")" = 1 ] || q "CREATE USER solange WITH PASSWORD 'solange'"
+        [ "$$(q "SELECT 1 FROM pg_database WHERE datname='solange'")" = 1 ] || q "CREATE DATABASE solange OWNER solange"
+        echo "solange database ready"
+
+  solange-migrate:
+    profiles: ["qr"]
+    image: ${SOLANGE_IMAGE:-developerspavs/kulpay-solange}:${SOLANGE_TAG:-2026.10.03-1}
+    depends_on:
+      solange-db: { condition: service_completed_successfully }
+    command: ["migrate"]
+    environment:
+      SOLANGE_DATABASE_URL: postgres://solange:solange@db:5432/solange?sslmode=disable
+
+  # http://localhost:${SOLANGE_PORT}: the API kuloffice calls, and the scan
+  # edge printed codes point at. Test mode: its webhooks may be plain http.
+  solange:
+    profiles: ["qr"]
+    image: ${SOLANGE_IMAGE:-developerspavs/kulpay-solange}:${SOLANGE_TAG:-2026.10.03-1}
+    network_mode: service:net
+    restart: unless-stopped
+    depends_on:
+      solange-migrate: { condition: service_completed_successfully }
+    command: ["serve"]
+    environment:
+      SOLANGE_DATABASE_URL: postgres://solange:solange@db:5432/solange?sslmode=disable
+      SOLANGE_LISTEN: ":${SOLANGE_PORT:-8094}"
+      SOLANGE_PUBLIC_URL: http://localhost:${SOLANGE_PORT:-8094}
+      SOLANGE_VISITOR_SECRET: kuloffice-demo-local-visitor-secret
+      # Seals webhook secrets: local only, never the server's.
+      SOLANGE_ENCRYPTION_KEY: a3Vsb2ZmaWNlLWRlbW8tbG9jYWwtc29sYW5nZS1rZXk=
+      SOLANGE_TRUSTED_PROXIES: 127.0.0.1
 
   # Activates the license and registers Keycloak as kuloffice's identity
   # provider, skipping whichever is already done. Re-run with `make bootstrap`.

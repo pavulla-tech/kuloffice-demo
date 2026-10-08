@@ -50,7 +50,7 @@ COMPOSE = LICENSE_PUBLIC_KEY="$$(cat $(KEYS)/public.pem.base64 2>/dev/null)" \
 # Where each switchable service comes from (see stack.env.example). Passed to
 # stack/resolve.sh with the settings it needs.
 RESOLVE_VARS = KEYCLOAK PRESET PANEL KULOFFICE WEB FILESERVER STACK_NAME STACK_BIND KC_PORT KULOFFICE_PORT KULOFFICE_GRPC_PORT \
-	PORTAL_PORT PORTAL_DIR \
+	PORTAL_PORT PORTAL_DIR SOLANGE_PORT SOLANGE_TAG \
 	WEB_PORT PANEL_PORT SMS_INBOX_PORT FILESERVER_PORT MINIO_PORT MINIO_CONSOLE_PORT DB_PORT \
 	INTAKA_DIR KULOFFICE_DIR WEB_DIR FILESERVER_DIR WORKFORCE_API_SECRET REVIEWER_EMAIL \
 	SERVER_KEYCLOAK_URL SERVER_KULOFFICE_URL SERVER_WEB_URL SERVER_REALM SERVER_ADMIN_CLIENT_SECRET \
@@ -127,7 +127,8 @@ up: stack.env keys plan
 			code=$$(docker inspect -f '{{.State.ExitCode}}' $$id); \
 			if [ "$$code" != "0" ]; then echo "$$1 failed (exit $$code)" >&2; exit 1; fi; }; \
 		if [ "$$STACK_KULOFFICE_LOCAL" = yes ]; then echo "Configuring kuloffice…"; wait_for bootstrap; fi; \
-		if [ "$$STACK_SEED" = yes ]; then wait_for reviewer-seed; fi
+		if [ "$$STACK_SEED" = yes ]; then wait_for reviewer-seed; fi; \
+		if [ "$$STACK_QR" = local ]; then STACK_NAME=$(STACK_NAME) KULOFFICE_PORT=$(KULOFFICE_PORT) SOLANGE_PORT=$(SOLANGE_PORT) sh stack/solange-setup.sh; fi
 	@$(MAKE) --no-print-directory where
 
 # What the last make up runs here and what it uses on the server.
