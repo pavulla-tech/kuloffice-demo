@@ -10,7 +10,7 @@
 #
 # Settings are in stack.env (created from stack.env.example on first use).
 
-.PHONY: help up plan where down restart rebuild logs ps urls bootstrap realm buckets reviewer review kuloffice sms ussd-test db psql \
+.PHONY: help up plan where down restart rebuild logs ps urls bootstrap realm buckets reviewer review closure kuloffice sms ussd-test db psql \
         keys license config clean legacy-stop
 
 # Creates stack.env first if it is missing, with its own web session secret.
@@ -81,6 +81,8 @@ help:
 	@echo "make reviewer        re-run the demo reviewer's seeding (operator, identity, role)"
 	@echo "make review ACCOUNT=acc_... [OUTCOME=approve|reject|request_documents] [MESSAGE=...] [DOCS=TYPE:text;...]"
 	@echo "                     decide an account's KYC review as the demo reviewer"
+	@echo "make closure [ACCOUNT=acc_... [OUTCOME=approve|reject] [REASON=...]]"
+	@echo "                     list Conta Pagamento closure requests, or decide one as the demo reviewer"
 	@echo "make kuloffice       recreate kuloffice with stack.kuloffice.env (MiniAiLive etc.)"
 	@echo "make sms             print the dev SMS inbox (OTP codes, kuloffice SMS)"
 	@echo "make ussd-test       drive intaka's USSD channel end to end against this stack's Keycloak"
@@ -185,6 +187,14 @@ review:
 		REVIEWER_EMAIL="$(REVIEWER_EMAIL)" REVIEWER_PASSWORD="$(REVIEWER_PASSWORD)" \
 		ACCOUNT="$(ACCOUNT)" OUTCOME="$(OUTCOME)" REASON="$(REASON)" MESSAGE="$(MESSAGE)" DOCS="$(DOCS)" \
 		python3 stack/review.py
+
+# Conta Pagamento closure requests, as the demo reviewer (see stack/closure.py).
+closure:
+	@PANEL_URL=http://localhost:$(PANEL_PORT) KULOFFICE_URL=http://localhost:$(KULOFFICE_PORT) \
+		WORKFORCE_ISSUER=http://localhost:$(KC_PORT)/auth/realms/workforce \
+		REVIEWER_EMAIL="$(REVIEWER_EMAIL)" REVIEWER_PASSWORD="$(REVIEWER_PASSWORD)" \
+		ACCOUNT="$(ACCOUNT)" OUTCOME="$(OUTCOME)" REASON="$(REASON)" \
+		python3 stack/closure.py
 
 # A plain restart keeps the old environment; settings need a new container.
 kuloffice:
