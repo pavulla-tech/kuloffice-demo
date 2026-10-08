@@ -276,9 +276,12 @@ KYC images that are never accepted expire from the `kyc-pending` bucket after
 
 ## kulportal
 
-Ready but off. When it is: set `KULPORTAL_TAG`, add `KULPORTAL` to the image
-targets (`make images S=KULPORTAL`, `make push S=KULPORTAL`), put its settings
-in `kulportal.env`, then `make start-portal` and enable `apache/kulportal.conf`.
+The review portal is kulportal2, released like the others: a tag on its `main`
+(`v0.1.0-alpha00`, …) builds `developerspavs/kulpay-kulportal` and deploys it.
+The first deploy generates `KULPORTAL_CLIENT_SECRET` and `KULPORTAL_SESSION_SECRET`
+into `.env` and makes the `kulportal` client in the workforce realm (init keeps
+it, also after a Keycloak reset). Apache serves it from `apache/kulportal.conf`
+at `KULPORTAL_PUBLIC_URL`. Reviewers are operators: `make operator`.
 
 ## Things that bite
 

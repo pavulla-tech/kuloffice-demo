@@ -39,6 +39,10 @@ echo "== workforce realm '${WORKFORCE_REALM:-workforce}'"
 # No demo reviewer: staff are added with `make operator`.
 REVIEWER_EMAIL= API_CLIENT_SECRET="${WORKFORCE_API_SECRET:?}" python3 /setup/add_workforce_realm.py
 python3 /tools/solange_console_client.py
+# The review portal's client, once bin/kulpay has made its secret.
+if [ -n "${KULPORTAL_CLIENT_SECRET:-}" ]; then
+  PORTAL_URL="${KULPORTAL_PUBLIC_URL:?}" PORTAL_CLIENT_SECRET="$KULPORTAL_CLIENT_SECRET" python3 /stack/add_portal_client.py
+fi
 
 echo "== kuloffice"
 KULOFFICE_LICENSE_KEY="${KULOFFICE_LICENSE_KEY:?}" \

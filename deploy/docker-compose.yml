@@ -329,6 +329,14 @@ services:
     environment:
       PORT: "3000"
       HOSTNAME: 0.0.0.0
+      # kulportal2: reviewers sign in to the workforce realm (its client is made
+      # by init, whose secret bin/kulpay generates into .env on first deploy).
+      KULOFFICE_URL: http://kuloffice:8080
+      OIDC_ISSUER: ${KEYCLOAK_PUBLIC_URL}/realms/${WORKFORCE_REALM:-workforce}
+      OIDC_CLIENT_ID: kulportal
+      OIDC_CLIENT_SECRET: ${KULPORTAL_CLIENT_SECRET:-}
+      PORTAL_URL: ${KULPORTAL_PUBLIC_URL:-https://portal.kulpay.pavulla.com}
+      SESSION_SECRET: ${KULPORTAL_SESSION_SECRET:-}
     ports:
       - "127.0.0.1:${KULPORTAL_PORT:-9780}:3000"
 

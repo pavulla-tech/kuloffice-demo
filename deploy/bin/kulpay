@@ -236,6 +236,8 @@ probe() {
     kuloffice) url=http://127.0.0.1:8080/; any=yes ;;
     web) url=http://127.0.0.1:3000/ ;;
     solange) url=http://127.0.0.1:8090/healthz ;;
+    # Any answer: its pages redirect to the sign-in.
+    kulportal) url=http://127.0.0.1:3000/; any=yes ;;
     *) return 0 ;;
   esac
   for i in $(seq 20); do
@@ -426,6 +428,18 @@ prune_resets() {
 valid_unit() { is_unit "${1:-}" || die "unknown unit '${1:-}' (one of: $UNITS)"; }
 valid_tag() { is_version "${1:-}" || die "'${1:-}' is not a tag like v0.1.0-alpha01"; }
 
+# The portal's two secrets, made once into .env (not shown), and its client in
+# the workforce realm (idempotent).
+portal_setup() {
+  local name
+  for name in KULPORTAL_CLIENT_SECRET KULPORTAL_SESSION_SECRET; do
+    [[ -n $(env_get "$name" || true) ]] || env_set "$name" "$(head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n')"
+  done
+  say "the portal's client in the workforce realm"
+  compose --profile tools run --rm tools sh -c \
+    'KC_BOOTSTRAP_ADMIN_USERNAME="${KC_ADMIN_USER:-admin}" KC_BOOTSTRAP_ADMIN_PASSWORD="$KC_ADMIN_PASSWORD" PORTAL_URL="$KULPORTAL_PUBLIC_URL" PORTAL_CLIENT_SECRET="$KULPORTAL_CLIENT_SECRET" python3 /stack/add_portal_client.py'
+}
+
 cmd_deploy() {
   local unit=${1:-} tag=${2:-} cur mode=update db backups="" prev_files
   valid_unit "$unit"; valid_tag "$tag"
@@ -437,6 +451,7 @@ cmd_deploy() {
     [[ $(patch_of "$tag") != "$(patch_of "$cur")" ]] && mode=reset
   fi
   say "deploy $unit: ${cur:-nothing} → $tag ($mode)"
+  [[ $unit == kulportal ]] && portal_setup
   pull_unit "$unit" "$tag"
 
   if [[ $mode == update ]]; then
