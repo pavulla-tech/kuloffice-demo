@@ -69,6 +69,7 @@ services:
       - "${STACK_BIND:-127.0.0.1}:${WEB_PORT:-3000}:${WEB_PORT:-3000}"
       - "${STACK_BIND:-127.0.0.1}:${PORTAL_PORT:-3100}:${PORTAL_PORT:-3100}"
       - "${STACK_BIND:-127.0.0.1}:${SOLANGE_PORT:-8094}:${SOLANGE_PORT:-8094}"
+      - "${STACK_BIND:-127.0.0.1}:${SOLANGE_CONSOLE_PORT:-8095}:${SOLANGE_CONSOLE_PORT:-8095}"
       # The panel holds live tokens: loopback only, whatever STACK_BIND says.
       - "127.0.0.1:${PANEL_PORT:-8765}:${PANEL_PORT:-8765}"
 
@@ -153,9 +154,13 @@ services:
     volumes:
       - ${INTAKA_DIR:-../keycloak-phone-authenticator}/demo/setup:/setup:ro
       - ./stack:/stack:ro
+      - ./deploy/tools:/deploy-tools:ro
     environment:
       KEYCLOAK_URL: http://localhost:${KC_PORT:-8080}/auth
       REALM: demo
+      # Solange's console client and roles (the server's deploy/tools scripts).
+      SOLANGE_CONSOLE_PUBLIC_URL: http://localhost:${SOLANGE_CONSOLE_PORT:-8095}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: admin
       # The review portal's client (stack/add_portal_client.py).
       PORTAL_URL: http://localhost:${PORTAL_PORT:-3100}
       PORTAL_CLIENT_SECRET: ${PORTAL_CLIENT_SECRET:-kulportal-local-secret}
@@ -186,6 +191,8 @@ services:
         if [ -f /setup/update_existing_realm.py ]; then python3 /setup/update_existing_realm.py; fi
         if [ -f /setup/add_workforce_realm.py ]; then python3 /setup/add_workforce_realm.py; else echo "no workforce realm script in this intaka checkout: reviewer sign-in skipped"; fi
         python3 /stack/add_portal_client.py
+        python3 /deploy-tools/solange_console_client.py
+        STAFF_EMAIL="$$REVIEWER_EMAIL" SOLANGE_ROLES=admin python3 /deploy-tools/staff_user.py
 
   # The demo backend from intaka. It is the dev SMS inbox - Keycloak sends codes
   # to it and kuloffice sends its SMS to it, so nothing reaches a real phone;
@@ -369,6 +376,7 @@ services:
   solange-migrate:
     profiles: ["qr"]
     image: ${SOLANGE_IMAGE:-developerspavs/kulpay-solange}:${SOLANGE_TAG:-2026.10.03-1}
+    platform: linux/amd64 # the only image built; runs emulated on Apple silicon
     depends_on:
       solange-db: { condition: service_completed_successfully }
     command: ["migrate"]
@@ -380,6 +388,7 @@ services:
   solange:
     profiles: ["qr"]
     image: ${SOLANGE_IMAGE:-developerspavs/kulpay-solange}:${SOLANGE_TAG:-2026.10.03-1}
+    platform: linux/amd64 # the only image built; runs emulated on Apple silicon
     network_mode: service:net
     restart: unless-stopped
     depends_on:
@@ -393,6 +402,28 @@ services:
       # Seals webhook secrets: local only, never the server's.
       SOLANGE_ENCRYPTION_KEY: a3Vsb2ZmaWNlLWRlbW8tbG9jYWwtc29sYW5nZS1rZXk=
       SOLANGE_TRUSTED_PROXIES: 127.0.0.1
+      # The staff API, for the console: the local workforce realm.
+      SOLANGE_KEYCLOAK_ISSUER: http://localhost:${KC_PORT:-8080}/auth/realms/workforce
+      SOLANGE_KEYCLOAK_CLIENT: solange-console
+
+  # Solange's console: codes, templates, logos, keys, webhooks.
+  # http://localhost:${SOLANGE_CONSOLE_PORT}, as the demo reviewer (admin there).
+  solange-console:
+    profiles: ["qr"]
+    image: ${SOLANGE_CONSOLE_IMAGE:-developerspavs/kulpay-solange-console}:${SOLANGE_CONSOLE_TAG:-2026.10.02-1}
+    platform: linux/amd64
+    network_mode: service:net
+    restart: unless-stopped
+    depends_on:
+      solange: { condition: service_started }
+    command: ["node_modules/.bin/next", "start", "--port", "${SOLANGE_CONSOLE_PORT:-8095}"]
+    environment:
+      SOLANGE_CONSOLE_URL: http://localhost:${SOLANGE_CONSOLE_PORT:-8095}
+      SOLANGE_KEYCLOAK_ISSUER: http://localhost:${KC_PORT:-8080}/auth/realms/workforce
+      SOLANGE_KEYCLOAK_CLIENT_ID: solange-console
+      SOLANGE_API_URL: http://localhost:${SOLANGE_PORT:-8094}
+      SOLANGE_PUBLIC_URL: http://localhost:${SOLANGE_PORT:-8094}
+      SOLANGE_SESSION_SECRET: kuloffice-demo-local-solange-console-session-0123456789
 
   # Activates the license and registers Keycloak as kuloffice's identity
   # provider, skipping whichever is already done. Re-run with `make bootstrap`.

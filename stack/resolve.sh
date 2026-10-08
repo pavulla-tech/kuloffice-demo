@@ -148,7 +148,7 @@ if local_ "$KEYCLOAK"; then add _ keycloak; add _ base; add _ inbox; add _ panel
 if [ "${PANEL:-}" = on ]; then add _ panel; fi
 case " $profiles " in *" panel "*) ;; *) stop="$stop token-panel" ;; esac
 if local_ "$KULOFFICE"; then add _ kuloffice; add _ base; else stop="$stop kuloffice bootstrap fileserver minio minio-init"; fi
-if [ "$QR" = local ]; then add _ qr; else stop="$stop solange solange-migrate solange-db"; fi
+if [ "$QR" = local ]; then add _ qr; else stop="$stop solange solange-console solange-migrate solange-db"; fi
 if local_ "$WEB"; then add _ web; else stop="$stop web"; fi
 if [ "$SEED" = yes ]; then add _ seed; else stop="$stop reviewer-seed"; fi
 # The review portal needs the local staff realm and kuloffice, and its checkout.
@@ -212,7 +212,7 @@ STACK_QR=$QR
 EOF
 # Ports and the image prefix, so `make up WEB_PORT=…` reaches compose too.
 for v in STACK_NAME STACK_BIND KC_PORT KULOFFICE_PORT KULOFFICE_GRPC_PORT WEB_PORT PANEL_PORT SMS_INBOX_PORT \
-  FILESERVER_PORT MINIO_PORT MINIO_CONSOLE_PORT DB_PORT PORTAL_PORT SOLANGE_PORT; do
+  FILESERVER_PORT MINIO_PORT MINIO_CONSOLE_PORT DB_PORT PORTAL_PORT SOLANGE_PORT SOLANGE_CONSOLE_PORT; do
   eval "val=\${$v:-}"
   [ -z "$val" ] || printf '%s=%s\n' "$v" "$val" >> .stack/resolved.env
 done
@@ -228,7 +228,8 @@ chmod 600 .stack/resolved.env
   if local_ "$KULOFFICE"; then
     printf '%-10s %-38s %s\n' fileserver "http://localhost:${FILESERVER_PORT:-8082}" "$(source_of fileserver "$FILESERVER" "${FILESERVER_DIR:-../boquisso-fileserver}")"
     case $QR in
-      local) printf '%-10s %-38s %s\n' solange "$SOLANGE_BASE" "Docker Hub (${SOLANGE_TAG:-2026.10.03-1}), test mode" ;;
+      local) printf '%-10s %-38s %s\n' solange "$SOLANGE_BASE" "Docker Hub (${SOLANGE_TAG:-2026.10.03-1}), test mode"
+             printf '%-10s %-38s %s\n' console "http://localhost:${SOLANGE_CONSOLE_PORT:-8095}" "Solange's console, as the reviewer" ;;
       server) printf '%-10s %-38s %s\n' solange "$SOLANGE_BASE" "server (SOLANGE_API_KEY)" ;;
       *) printf '%-10s %-38s %s\n' solange off "" ;;
     esac
