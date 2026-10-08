@@ -142,6 +142,13 @@ case " $profiles " in *" panel "*) ;; *) stop="$stop token-panel" ;; esac
 if local_ "$KULOFFICE"; then add _ kuloffice; add _ base; else stop="$stop kuloffice bootstrap fileserver minio minio-init"; fi
 if local_ "$WEB"; then add _ web; else stop="$stop web"; fi
 if [ "$SEED" = yes ]; then add _ seed; else stop="$stop reviewer-seed"; fi
+# The review portal needs the local staff realm and kuloffice, and its checkout.
+PORTAL=off
+if local_ "$KEYCLOAK" && local_ "$KULOFFICE" && [ -d "${PORTAL_DIR:-../kulportal2}" ]; then
+  PORTAL=on; add _ portal; build="$build portal"
+else
+  stop="$stop portal"
+fi
 case " $profiles " in *" base "*) ;; *) stop="$stop db" ;; esac
 [ "$KEYCLOAK" != build ] || build="$build keycloak"
 [ "$KULOFFICE" != build ] || build="$build kuloffice"
@@ -204,6 +211,9 @@ chmod 600 .stack/resolved.env
   printf '%-10s %-38s %s\n' keycloak "$KC_PUBLIC" "$(source_of keycloak "$KEYCLOAK" "${INTAKA_DIR:-../keycloak-phone-authenticator}")"
   printf '%-10s %-38s %s\n' kuloffice "$API_URL" "$(source_of kuloffice "$KULOFFICE" "${KULOFFICE_DIR:-../kuloffice}")"
   printf '%-10s %-38s %s\n' web "$WEB_URL" "$(source_of web "$WEB" "${WEB_DIR:-../kulpay-web}")"
+  if [ "$PORTAL" = on ]; then
+    printf '%-10s %-38s %s\n' portal "http://localhost:${PORTAL_PORT:-3100}" "build (${PORTAL_DIR:-../kulportal2})"
+  fi
   if local_ "$KULOFFICE"; then
     printf '%-10s %-38s %s\n' fileserver "http://localhost:${FILESERVER_PORT:-8082}" "$(source_of fileserver "$FILESERVER" "${FILESERVER_DIR:-../boquisso-fileserver}")"
     printf '%-10s %-38s %s\n' solange "${SOLANGE_BASE:-off}" "${SOLANGE_BASE:+server (SOLANGE_API_KEY)}"

@@ -67,6 +67,7 @@ services:
       - "${STACK_BIND:-127.0.0.1}:${KULOFFICE_PORT:-18080}:${KULOFFICE_PORT:-18080}"
       - "${STACK_BIND:-127.0.0.1}:${KULOFFICE_GRPC_PORT:-50051}:${KULOFFICE_GRPC_PORT:-50051}"
       - "${STACK_BIND:-127.0.0.1}:${WEB_PORT:-3000}:${WEB_PORT:-3000}"
+      - "${STACK_BIND:-127.0.0.1}:${PORTAL_PORT:-3100}:${PORTAL_PORT:-3100}"
       # The panel holds live tokens: loopback only, whatever STACK_BIND says.
       - "127.0.0.1:${PANEL_PORT:-8765}:${PANEL_PORT:-8765}"
 
@@ -150,9 +151,13 @@ services:
       keycloak: { condition: service_healthy }
     volumes:
       - ${INTAKA_DIR:-../keycloak-phone-authenticator}/demo/setup:/setup:ro
+      - ./stack:/stack:ro
     environment:
       KEYCLOAK_URL: http://localhost:${KC_PORT:-8080}/auth
       REALM: demo
+      # The review portal's client (stack/add_portal_client.py).
+      PORTAL_URL: http://localhost:${PORTAL_PORT:-3100}
+      PORTAL_CLIENT_SECRET: ${PORTAL_CLIENT_SECRET:-kulportal-local-secret}
       APP_CLIENT_ID: demo-app
       ADMIN_CLIENT_ID: demo-backend
       ADMIN_CLIENT_SECRET: demo-backend-secret
@@ -179,6 +184,7 @@ services:
         if [ -f /setup/add_ussd_client.py ]; then python3 /setup/add_ussd_client.py; fi
         if [ -f /setup/update_existing_realm.py ]; then python3 /setup/update_existing_realm.py; fi
         if [ -f /setup/add_workforce_realm.py ]; then python3 /setup/add_workforce_realm.py; else echo "no workforce realm script in this intaka checkout: reviewer sign-in skipped"; fi
+        python3 /stack/add_portal_client.py
 
   # The demo backend from intaka. It is the dev SMS inbox - Keycloak sends codes
   # to it and kuloffice sends its SMS to it, so nothing reaches a real phone;
@@ -436,6 +442,28 @@ services:
       KULPAY_KEYCLOAK_PASSKEY_CLIENT_ID: kulpay-web-passkey
       KULPAY_API_URL: ${API_URL:-http://localhost:18080}
       KULPAY_SESSION_SECRET: ${KULPAY_SESSION_SECRET:-}
+
+  # The review portal (kulportal2): reviewers sign in to the workforce realm
+  # and work kuloffice's review queue. http://localhost:${PORTAL_PORT}.
+  portal:
+    build:
+      context: ${PORTAL_DIR:-../kulportal2}
+    image: ${PORTAL_REF:-kulstack-portal:local}
+    profiles: ["portal"]
+    network_mode: service:net
+    restart: unless-stopped
+    depends_on:
+      kuloffice: { condition: service_started, required: false }
+      realm-setup: { condition: service_completed_successfully, required: false }
+    environment:
+      PORT: ${PORTAL_PORT:-3100}
+      HOSTNAME: 0.0.0.0
+      KULOFFICE_URL: http://localhost:${KULOFFICE_PORT:-18080}
+      OIDC_ISSUER: http://localhost:${KC_PORT:-8080}/auth/realms/workforce
+      OIDC_CLIENT_ID: kulportal
+      OIDC_CLIENT_SECRET: ${PORTAL_CLIENT_SECRET:-kulportal-local-secret}
+      PORTAL_URL: http://localhost:${PORTAL_PORT:-3100}
+      SESSION_SECRET: ${PORTAL_SESSION_SECRET:-local-portal-session-secret-change-me-0123456789}
 
   # Signs numbers in and keeps their tokens fresh: http://localhost:${PANEL_PORT}.
   token-panel:

@@ -50,6 +50,7 @@ COMPOSE = LICENSE_PUBLIC_KEY="$$(cat $(KEYS)/public.pem.base64 2>/dev/null)" \
 # Where each switchable service comes from (see stack.env.example). Passed to
 # stack/resolve.sh with the settings it needs.
 RESOLVE_VARS = KEYCLOAK PRESET PANEL KULOFFICE WEB FILESERVER STACK_NAME STACK_BIND KC_PORT KULOFFICE_PORT KULOFFICE_GRPC_PORT \
+	PORTAL_PORT PORTAL_DIR \
 	WEB_PORT PANEL_PORT SMS_INBOX_PORT FILESERVER_PORT MINIO_PORT MINIO_CONSOLE_PORT DB_PORT \
 	INTAKA_DIR KULOFFICE_DIR WEB_DIR FILESERVER_DIR WORKFORCE_API_SECRET REVIEWER_EMAIL \
 	SERVER_KEYCLOAK_URL SERVER_KULOFFICE_URL SERVER_WEB_URL SERVER_REALM SERVER_ADMIN_CLIENT_SECRET \
@@ -63,6 +64,7 @@ help:
 	@echo "make up              build, start and configure the stack (what stack.env says is local)"
 	@echo "make up PRESET=web|kuloffice|backend|local    web: only the web app here; kuloffice: web +"
 	@echo "                     kuloffice here, Keycloak on the server; backend: only kuloffice here; local: all"
+	@echo "                     (with ../kulportal2, a local Keycloak and kuloffice also run the review portal)"
 	@echo "                     PANEL=on adds the token panel when Keycloak is on the server"
 	@echo "make up WEB=build KULOFFICE=server KEYCLOAK=v0.1.0-alpha03 …   any mix, for one run"
 	@echo "                     (build | a Docker Hub tag | release | server)"
