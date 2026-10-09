@@ -127,7 +127,9 @@ services:
       BLNK_ENABLE_TELEMETRY: "false"
       BLNK_ENABLE_OBSERVABILITY: "false"
     healthcheck:
-      test: ["CMD-SHELL", "wget -q --header=\"X-Blnk-Key: $$BLNK_SERVER_SECRET_KEY\" --spider http://127.0.0.1:5001/"]
+      # BLNK has no route at / or /health (both 404); listing one ledger is
+      # what kuloffice's bootstrap does, and proves the key and the database.
+      test: ["CMD-SHELL", "wget -q -O /dev/null --header=\"X-Blnk-Key: $$BLNK_SERVER_SECRET_KEY\" 'http://127.0.0.1:5001/ledgers?limit=1&offset=0'"]
       interval: 5s
       timeout: 5s
       retries: 30
