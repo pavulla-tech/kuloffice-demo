@@ -33,6 +33,10 @@ networks:
 
 volumes:
   db-data:
+  blnk-redis-data:
+  blnk-typesense-data:
+  gateway-config:
+  simulator-data:
   minio-data:
   token-panel-data:
 
@@ -48,6 +52,8 @@ services:
       KULOFFICE_DB_PASSWORD: ${KULOFFICE_DB_PASSWORD:?set KULOFFICE_DB_PASSWORD}
       KEYCLOAK_DB_PASSWORD: ${KEYCLOAK_DB_PASSWORD:?set KEYCLOAK_DB_PASSWORD}
       SOLANGE_DB_PASSWORD: ${SOLANGE_DB_PASSWORD:?set SOLANGE_DB_PASSWORD}
+      BLNK_DB_PASSWORD: ${BLNK_DB_PASSWORD:?set BLNK_DB_PASSWORD}
+      GATEWAY_DB_PASSWORD: ${GATEWAY_DB_PASSWORD:?set GATEWAY_DB_PASSWORD}
     volumes:
       - db-data:/var/lib/postgresql/data
       - ./db:/docker-entrypoint-initdb.d:ro
@@ -56,6 +62,210 @@ services:
       interval: 5s
       timeout: 5s
       retries: 30
+
+  blnk-db-init:
+    image: postgres:17-alpine
+    networks: [kulpay]
+    depends_on:
+      db: { condition: service_healthy }
+    environment:
+      POSTGRES_USER: postgres
+      DB_ROOT_PASSWORD: ${DB_ROOT_PASSWORD}
+      BLNK_DB_PASSWORD: ${BLNK_DB_PASSWORD}
+    volumes:
+      - ./db/init-blnk.sh:/init-blnk.sh:ro
+    entrypoint: ["/bin/sh", "/init-blnk.sh"]
+
+  # ---- financial core --------------------------------------------------------
+
+  # BLNK's database is isolated inside the shared Postgres instance. Redis is
+  # its durable work queue; Typesense is a rebuildable search projection.
+  blnk-redis:
+    <<: *restart
+    image: redis:7.2.4-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - blnk-redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  blnk-typesense:
+    <<: *restart
+    image: typesense/typesense:29.0
+    command: ["--data-dir", "/data", "--api-key=${BLNK_TYPESENSE_API_KEY:?set BLNK_TYPESENSE_API_KEY}", "--listen-port", "8108"]
+    volumes:
+      - blnk-typesense-data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8108/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  blnk-server:
+    <<: *restart
+    image: ${BLNK_IMAGE:-jerryenebeli/blnk}:${BLNK_TAG:?set BLNK_TAG}
+    entrypoint: ["/bin/sh", "-ec"]
+    command: ["blnk migrate up && exec blnk start"]
+    depends_on:
+      blnk-db-init: { condition: service_completed_successfully }
+      blnk-redis: { condition: service_healthy }
+      blnk-typesense: { condition: service_healthy }
+    environment: &blnk-environment
+      BLNK_PROJECT_NAME: KulPay
+      BLNK_DATA_SOURCE_DNS: postgres://blnk:${BLNK_DB_PASSWORD}@db:5432/blnk?sslmode=disable
+      BLNK_REDIS_DNS: blnk-redis:6379
+      BLNK_TYPESENSE_DNS: http://blnk-typesense:8108
+      BLNK_TYPESENSE_KEY: ${BLNK_TYPESENSE_API_KEY}
+      BLNK_SERVER_PORT: "5001"
+      BLNK_SERVER_SECURE: "true"
+      BLNK_SERVER_SECRET_KEY: ${BLNK_SERVER_SECRET_KEY:?set BLNK_SERVER_SECRET_KEY}
+      BLNK_TOKENIZATION_SECRET: ${BLNK_TOKENIZATION_SECRET:?set BLNK_TOKENIZATION_SECRET}
+      BLNK_ENABLE_TELEMETRY: "false"
+      BLNK_ENABLE_OBSERVABILITY: "false"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --header=\"X-Blnk-Key: $$BLNK_SERVER_SECRET_KEY\" --spider http://127.0.0.1:5001/"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+
+  # This is BLNK's own queue processor, not the KulOffice instruction worker.
+  # Both use the same immutable image and configuration.
+  blnk-worker:
+    <<: *restart
+    image: ${BLNK_IMAGE:-jerryenebeli/blnk}:${BLNK_TAG}
+    entrypoint: ["blnk", "workers"]
+    depends_on:
+      blnk-server: { condition: service_healthy }
+    environment: *blnk-environment
+
+  # ---- payments (development) --------------------------------------------------
+
+  # KulPay's own payments gateway instance, separate from the merchant
+  # gateway deployment. Internal only: kuloffice is its one client. Its live
+  # M-Pesa, e-Mola and card bindings point at the PSP simulator below, so on
+  # this server simulated payments are live payments. Never copy this block
+  # onto a server with real provider credentials.
+  gateway-db-init:
+    image: postgres:17-alpine
+    networks: [kulpay]
+    depends_on:
+      db: { condition: service_healthy }
+    environment:
+      POSTGRES_USER: postgres
+      DB_ROOT_PASSWORD: ${DB_ROOT_PASSWORD}
+      GATEWAY_DB_PASSWORD: ${GATEWAY_DB_PASSWORD:?set GATEWAY_DB_PASSWORD}
+    volumes:
+      - ./db/init-gateway.sh:/init-gateway.sh:ro
+    entrypoint: ["/bin/sh", "/init-gateway.sh"]
+
+  # API keys are a list, which the gateway reads only from its YAML file; this
+  # writes that file from .env on every start (secrets stay in .env).
+  gateway-config:
+    image: postgres:17-alpine
+    networks: [kulpay]
+    environment:
+      GATEWAY_API_KEY: ${GATEWAY_API_KEY:?set GATEWAY_API_KEY}
+      GATEWAY_ADMIN_KEY: ${GATEWAY_ADMIN_KEY:?set GATEWAY_ADMIN_KEY}
+    volumes:
+      - gateway-config:/config
+    entrypoint:
+      - /bin/sh
+      - -ec
+      - |
+        for k in "$$GATEWAY_API_KEY" "$$GATEWAY_ADMIN_KEY"; do
+          case $$k in *[!0-9a-f]* | "") echo "gateway keys must be hex (openssl rand -hex 32)" >&2; exit 1 ;; esac
+        done
+        umask 022
+        cat > /config/kulpay-payments.yaml.tmp <<EOF
+        keys:
+          - id: kuloffice
+            secret: "$$GATEWAY_API_KEY"
+            mode: live
+            label: "kuloffice top-ups"
+            scopes: [payments:read, payments:write]
+            rate_per_minute: 600
+          - id: operator
+            secret: "$$GATEWAY_ADMIN_KEY"
+            mode: live
+            label: "connector bindings"
+            scopes: [admin:read, connectors:read, connectors:write]
+            rate_per_minute: 60
+        EOF
+        mv /config/kulpay-payments.yaml.tmp /config/kulpay-payments.yaml
+
+  gateway:
+    <<: *restart
+    image: ${GATEWAY_IMAGE:-developerspavs/kulpay-gateway}:${GATEWAY_TAG:?set GATEWAY_TAG}
+    depends_on:
+      gateway-db-init: { condition: service_completed_successfully }
+      gateway-config: { condition: service_completed_successfully }
+    command: ["--config", "/etc/kulpay/kulpay-payments.yaml"]
+    environment:
+      KULPAY_MODE: live
+      KULPAY_DB_URL: &gateway-db postgres://gateway:${GATEWAY_DB_PASSWORD}@db:5432/gateway?sslmode=disable
+      KULPAY_DATABASE_URL: *gateway-db
+      KULPAY_ENCRYPTION_KEY: ${GATEWAY_ENCRYPTION_KEY:?set GATEWAY_ENCRYPTION_KEY}
+      KULPAY_ENCRYPTION_KEY_ID: dev-1
+      KULPAY_ADDR: ":9090"
+      KULPAY_MGMT_ADDR: ":9091"
+      KULPAY_EXTERNAL_URL: http://gateway:9090
+      KULPAY_DEFAULT_CURRENCY: MZN
+      KULPAY_DEFAULT_COUNTRY: MZ
+      KULPAY_ACCOUNT_NAME: KulPay
+      KULPAY_LOG_FORMAT: json
+      KULPAY_OIDC_ENABLED: "false"
+      # Every rail is a database binding (gateway-bind). Operator-confirmed
+      # "manual" payments would be money that never crossed a rail: off.
+      KULPAY_CONNECTORS_MANUAL_ENABLED: "false"
+    volumes:
+      - gateway-config:/etc/kulpay:ro
+    healthcheck:
+      test: ["CMD", "kulpay-payments", "healthcheck"]
+      interval: 15s
+      timeout: 5s
+      retries: 4
+      start_period: 40s
+    stop_grace_period: 60s
+
+  # Points the gateway's live bindings at the simulator. Idempotent: the
+  # gateway keeps each binding's ID, which kuloffice's collection balances use.
+  gateway-bind:
+    image: ${SIMULATOR_IMAGE:-developerspavs/kulpay-psp-simulator}:${SIMULATOR_TAG:?set SIMULATOR_TAG}
+    networks: [kulpay]
+    depends_on:
+      gateway: { condition: service_healthy }
+      simulator: { condition: service_healthy }
+    command: ["bind"]
+    environment:
+      BIND_GATEWAY_ADMIN_URL: http://gateway:9091
+      BIND_ADMIN_KEY: ${GATEWAY_ADMIN_KEY}
+      BIND_SIMULATOR_URL: http://simulator:8085
+      BIND_MODE: live
+
+  # Development only: plays M-Pesa, e-Mola and the card acquirer, and their
+  # customers. Its page (SIMULATOR_PUBLIC_URL) is where someone approves or
+  # declines a top-up; Apache must put a password in front of it.
+  simulator:
+    <<: *restart
+    image: ${SIMULATOR_IMAGE:-developerspavs/kulpay-psp-simulator}:${SIMULATOR_TAG}
+    environment:
+      SIMULATOR_ADDR: ":8085"
+      SIMULATOR_PUBLIC_URL: ${SIMULATOR_PUBLIC_URL:?set SIMULATOR_PUBLIC_URL}
+      SIMULATOR_HOLD_SECONDS: "60"
+      SIMULATOR_DEFAULT_BALANCE_MINOR: "5000000"
+    volumes:
+      - simulator-data:/data
+    ports:
+      - "127.0.0.1:${SIMULATOR_PORT:-9880}:8085"
+    healthcheck:
+      test: ["CMD", "kulpay-psp-simulator", "health"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
 
   # ---- identity ---------------------------------------------------------------
 
@@ -173,6 +383,9 @@ services:
       db: { condition: service_healthy }
       keycloak: { condition: service_healthy }
       fileserver: { condition: service_started }
+      blnk-server: { condition: service_healthy }
+      # Top-ups need the gateway's bindings in place (they run on every start).
+      gateway-bind: { condition: service_completed_successfully }
     # Anything else kuloffice reads (KULOFFICE_*): MiniAiLive, BLNK, NUIB API,
     # idfort, SMS templates. Optional; see kuloffice.env.example. The settings
     # below win over it.
@@ -206,6 +419,26 @@ services:
       # and wallet.
       KULOFFICE_OPERATOR_REVIEW_SYNC: "true"
       KULOFFICE_BIOMETRICS_ENABLED: ${BIOMETRICS_ENABLED:-true}
+      # KulOffice owns the semantic topology. A fresh BLNK install is populated
+      # and verified before any financial worker starts; provider IDs are never
+      # copied into deployment configuration.
+      KULOFFICE_ADAPTER_BLNK_BASE_URL: http://blnk-server:5001
+      KULOFFICE_ADAPTER_BLNK_API_KEY: ${BLNK_SERVER_SECRET_KEY}
+      KULOFFICE_ADAPTER_BLNK_ENVIRONMENT: ${KULOFFICE_ENVIRONMENT:-production}
+      KULOFFICE_ADAPTER_BLNK_BOOTSTRAP_ENABLED: "true"
+      # For now, selected financial capabilities run in the API container.
+      # The durable instruction lease still prevents a second executor.
+      KULOFFICE_EMBEDDED_FINANCIAL_WORKER: '{"enabled":true,"capabilities":["product_balance:query","product_transfer:create","fee:collect"],"max_capacity":1}'
+      # Top-ups collect through the stack's own gateway. A wallet charge waits
+      # for the customer (the simulator holds it up to 60s), so the client
+      # timeout outlasts it; a timeout is an unknown outcome, re-sent with the
+      # same reference.
+      KULOFFICE_TOPUP_ENABLED: "true"
+      KULOFFICE_TOPUP_GATEWAY: kulpay-gateway
+      KULOFFICE_TOPUP_GATEWAY_URL: http://gateway:9090
+      KULOFFICE_TOPUP_GATEWAY_API_KEY: ${GATEWAY_API_KEY}
+      KULOFFICE_TOPUP_GATEWAY_TIMEOUT: 120s
+      KULOFFICE_TOPUP_MAX_CAPACITY: "2"
       # QR codes through Solange. Off until the key is set: `make solange-kulpay`
       # issues it (and the webhook secret) into .env.
       KULOFFICE_SOLANGE_BASE_URL: http://solange:8090

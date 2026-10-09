@@ -383,6 +383,8 @@ reset_unit() { # unit tag
     keycloak) say "wiping database kuloffice and its files"; db_wipe kuloffice; files_wipe > /dev/null ;;
     kuloffice) say "wiping kuloffice's files"; files_wipe > /dev/null ;;
     solange) say "clearing kuloffice's QR records"; clear_qr_tables ;;
+    # Fresh bindings get fresh ids: kuloffice's top-ups would point at nothing.
+    gateway) say "wiping database kuloffice and its files"; db_wipe kuloffice; files_wipe > /dev/null ;;
   esac
   switch_unit "$unit" "$tag"
   compose up -d $services || true  # the health check decides
@@ -390,7 +392,7 @@ reset_unit() { # unit tag
 
   # What the fresh databases need before they work.
   case $unit in
-    keycloak | kuloffice)
+    keycloak | kuloffice | gateway)
       say "provisioning realms, the license and identity providers (init)"
       compose --profile tools run --rm tools /tools/init.sh
       ;;

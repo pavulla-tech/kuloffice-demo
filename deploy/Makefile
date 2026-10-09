@@ -5,7 +5,7 @@
 
 .PHONY: help setup sync-env clean-env-backups config check-images \
         images push theme license \
-        start start-portal stop restart logs ps update clean \
+        start start-portal stop restart logs ps update clean reset-blnk \
         init operator solange-kulpay \
         deploy rollback releases status health backup restore
 
@@ -17,7 +17,7 @@ COMPOSE = ENV_FILE=$(ENV_FILE) docker compose --env-file $(ENV_FILE)
 S ?=
 
 # Every image `make images` builds, by its .env prefix.
-IMAGES = KEYCLOAK KULOFFICE WEB FILESERVER TOKEN_PANEL TOOLS SOLANGE SOLANGE_CONSOLE
+IMAGES = KEYCLOAK KULOFFICE WEB FILESERVER TOKEN_PANEL TOOLS SOLANGE SOLANGE_CONSOLE GATEWAY SIMULATOR
 
 help:
 	@echo "Setup"
@@ -48,6 +48,7 @@ help:
 	@echo "  make health [U=web]     check the running units"
 	@echo "  make backup DB=kuloffice / make restore DB=kuloffice FILE=… YES=1"
 	@echo "  make clean              remove containers AND volumes (every database)"
+	@echo "  make reset-blnk YES=DESTROY  back up and rebuild only BLNK's complete ledger"
 	@echo ""
 	@echo "Provisioning (on the server, after start)"
 	@echo "  make init               realms, clients, kuloffice license and identity providers"
@@ -102,6 +103,10 @@ build_TOOLS           = docker build --platform $$TARGET_PLATFORM -t "$$TOOLS_IM
 build_SOLANGE         = docker build --platform $$TARGET_PLATFORM -t "$$SOLANGE_IMAGE:$$SOLANGE_TAG" -f images/solange.Dockerfile "$$SOLANGE_DIR"
 build_SOLANGE_CONSOLE = docker build --platform $$TARGET_PLATFORM -t "$$SOLANGE_CONSOLE_IMAGE:$$SOLANGE_CONSOLE_TAG" -f images/solange-console.Dockerfile "$$SOLANGE_DIR/console"
 build_KULPORTAL       = docker build --platform $$TARGET_PLATFORM -t "$$KULPORTAL_IMAGE:$$KULPORTAL_TAG" "$$KULPORTAL_DIR"
+# The payments gateway and the PSP simulator build from their repositories' own
+# Dockerfiles.
+build_GATEWAY         = docker build --platform $$TARGET_PLATFORM -t "$$GATEWAY_IMAGE:$$GATEWAY_TAG" "$$GATEWAY_DIR"
+build_SIMULATOR       = docker build --platform $$TARGET_PLATFORM -t "$$SIMULATOR_IMAGE:$$SIMULATOR_TAG" "$$SIMULATOR_DIR"
 
 images: check-images
 	@set -a; . ./$(ENV_FILE); set +a; set -e; \
@@ -112,6 +117,7 @@ images: check-images
 		KEYCLOAK) $(build_KEYCLOAK) ;; KULOFFICE) $(build_KULOFFICE) ;; WEB) $(build_WEB) ;; \
 		FILESERVER) $(build_FILESERVER) ;; TOKEN_PANEL) $(build_TOKEN_PANEL) ;; TOOLS) $(build_TOOLS) ;; \
 		SOLANGE) $(build_SOLANGE) ;; SOLANGE_CONSOLE) $(build_SOLANGE_CONSOLE) ;; KULPORTAL) $(build_KULPORTAL) ;; \
+		GATEWAY) $(build_GATEWAY) ;; SIMULATOR) $(build_SIMULATOR) ;; \
 		*) echo "unknown image $$name" >&2; exit 1 ;; \
 		esac; \
 	done
@@ -168,6 +174,11 @@ clean:
 	read answer; [ "$$answer" = "DESTROY" ] || { echo "aborted"; exit 1; }
 	$(COMPOSE) --profile portal --profile tools down -v
 
+# Development/installation reset for the financial core. This is intentionally
+# whole-database replacement: no partial ledger cleanup or additive repair.
+reset-blnk:
+	@ENV_FILE="$(ENV_FILE)" YES="$(YES)" sh scripts/reset-blnk.sh
+
 # ── provisioning (server) ─────────────────────────────────────────────────────
 
 init:
@@ -217,4 +228,3 @@ backup:
 restore:
 	@[ -n "$(DB)" ] && [ -n "$(FILE)" ] || { echo "usage: make restore DB=<database> FILE=<backup> YES=1" >&2; exit 1; }
 	@$(KULPAY) restore $(DB) $(FILE) $(if $(YES),--yes)
-

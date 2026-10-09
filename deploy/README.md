@@ -11,7 +11,11 @@ The whole of KulPay on one server, in one compose stack:
 | `solange` | https://qr.kulpay.pavulla.com | 9580 | Solange: QR codes, scans, webhooks |
 | `solange-console` | https://console.qr.kulpay.pavulla.com | 9680 | Solange's staff console |
 | `kulportal` | https://portal.kulpay.pavulla.com | 9780 | Off until ready (`make start-portal`) |
-| `db` | — | — | Postgres 17: one database and role each for kuloffice, Keycloak, Solange |
+| `blnk-server`, `blnk-worker` | — | — | Pinned self-hosted BLNK API and its queue processor; internal only |
+| `gateway` | — | — | KulPay's own payments gateway (katembe-payments), live mode; kuloffice collects top-ups through it. Internal only |
+| `simulator` | https://sim.kulpay.pavulla.com (password) | 9880 | Development only: the PSP simulator the gateway's live M-Pesa, e-Mola and card bindings point at, and its customer page |
+| `db` | — | — | Postgres 17: one isolated database and role each for kuloffice, Keycloak, Solange, BLNK, the gateway |
+| `blnk-redis`, `blnk-typesense` | — | — | BLNK's durable queue and rebuildable search projection; internal only |
 | `minio`, `fileserver` | — | — | MinIO behind KulPay's own boquisso file server, where kuloffice keeps KYC files |
 | `tools` | — | — | Provisioning, run on demand (`make init`, `make operator`) |
 
@@ -59,15 +63,38 @@ $EDITOR kuloffice.env        # MiniAiLive, NUIB API, idfort, SMS templates
 make config                  # fails on anything still missing
 ```
 
-The database passwords are used once, when Postgres first starts on an empty
-volume. Changing them in `.env` later does not change the roles.
+The original service database passwords are used once, when Postgres first
+starts on an empty volume. BLNK is also prepared by an idempotent init service,
+so it can be added to an existing stack and its role password follows `.env`.
+The gateway's database is prepared the same way (`gateway-db-init`).
 
 **2. Start.**
 
 ```bash
 make start
-make ps                      # keycloak healthy, solange-migrate exited 0
+make ps                      # keycloak and BLNK healthy; one-shot init/migrations exited 0
 ```
+
+KulOffice waits for BLNK, then discovers or creates the environment-scoped MZN
+topology: customer-product and connector-collection ledgers, and General Ledger
+external-funds and product-fees balances. It verifies stable ownership metadata
+on every start and never stores provider-generated IDs in `.env`. BLNK and its
+worker use the same pinned `BLNK_TAG`; no BLNK port is published on the host.
+
+For a deliberate development reinstall, `make reset-blnk YES=DESTROY` stops
+both executors, saves a compressed database dump, replaces the complete BLNK
+database plus its Redis/Typesense state, reapplies the pinned schema, and then
+starts KulOffice so the topology bootstrap runs. It does not partially delete
+ledger rows and does not touch customer authentication, KulOffice, Solange, or
+MinIO data. The printed backup can be restored with `make restore DB=blnk ...`.
+
+**Top-ups on a development server.** kuloffice collects through the stack's
+own gateway, whose live bindings point at the PSP simulator: `gateway-bind`
+(re)writes them on every start, and kuloffice waits for it. A top-up's payer
+approves or declines it on the simulator's page; on this server those are live
+payments. The simulator and `gateway-bind` must never run beside real provider
+credentials; see `kuloffice/docs/security-plan.md` for the controls planned
+before production.
 
 **3. Apache.** For each file in `apache/`: get its certificate (`certbot
 certonly --apache -d <host>`), copy it to `/etc/apache2/sites-available/`,
@@ -76,6 +103,7 @@ certonly --apache -d <host>`), copy it to `/etc/apache2/sites-available/`,
 ```bash
 a2enmod proxy proxy_http headers ssl auth_basic authn_file
 htpasswd -c /etc/apache2/kulpay-panel.htpasswd <user>    # the token panel's password
+htpasswd -c /etc/apache2/kulpay-simulator.htpasswd <user>  # the PSP simulator's (development only)
 ```
 
 Keycloak builds `http://` URLs and bounces the browser between schemes unless
@@ -174,6 +202,8 @@ git tag v0.1.0-alpha03 && git push origin v0.1.0-alpha03
 | boquisso-fileserver | `fileserver` | fileserver | none |
 | solange | `solange` | solange, solange-console | Solange's database |
 | kulportal | `kulportal` | kulportal | none (no workflow yet) |
+| katembe-payments | `gateway` | gateway | the gateway's database (a reset wipes kuloffice too: its top-ups hold the gateway's ids) |
+| kulpay-psp-simulator | `simulator` | simulator | its prompts and balances (a volume) |
 
 Each repository's `.github/workflows/release.yml` runs its tests, then this
 repository's reusable `service.yml`, which builds with the same recipes as
@@ -215,7 +245,7 @@ make releases [U=web]                # history and the last attempts
 make health [U=web]
 make deploy U=web T=v0.1.0-alpha03
 make rollback U=web [STEPS=2 | TO=v0.1.0-alpha01] [YES=1]
-make backup DB=kuloffice
+make backup DB=kuloffice            # DB=blnk is also supported
 make restore DB=kuloffice FILE=state/backups/kuloffice/… YES=1
 ```
 
@@ -293,3 +323,5 @@ at `KULPORTAL_PUBLIC_URL`. Reviewers are operators: `make operator`.
   intaka's `demo/theme` instead.
 - **`make clean` deletes every database and stored file**, and asks first.
 - **The token panel holds live tokens.** Never serve it without the password.
+- **The PSP simulator approves top-ups.** Never serve it without the password,
+  and never run it on a server whose gateway holds real provider credentials.
