@@ -153,6 +153,14 @@ pull_unit() { # unit tag: fails before anything changes
   registry_login
   for name in $(unit_images "$1"); do
     image=$(env_get "${name}_IMAGE")
+    # localhost/ images are never on a registry: they arrive in a bundle
+    # (make bundle on the laptop, scp, make load here).
+    if [[ $image == localhost/* ]]; then
+      docker image inspect "$image:$2" > /dev/null 2>&1 ||
+        die "$image:$2 is not loaded (copy its bundle here and run make load FILE=…)"
+      say "using the loaded $image:$2"
+      continue
+    fi
     say "pulling $image:$2"
     docker ${REGISTRY_CONFIG:+--config "$REGISTRY_CONFIG"} pull -q "$image:$2" > /dev/null ||
       die "could not pull $image:$2 (is the tag on Docker Hub?)"

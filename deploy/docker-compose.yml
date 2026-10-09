@@ -199,7 +199,7 @@ services:
 
   gateway:
     <<: *restart
-    image: ${GATEWAY_IMAGE:-developerspavs/kulpay-gateway}:${GATEWAY_TAG:?set GATEWAY_TAG}
+    image: ${GATEWAY_IMAGE:-localhost/kulpay-gateway}:${GATEWAY_TAG:?set GATEWAY_TAG}
     depends_on:
       gateway-db-init: { condition: service_completed_successfully }
       gateway-config: { condition: service_completed_successfully }
@@ -234,7 +234,7 @@ services:
   # Points the gateway's live bindings at the simulator. Idempotent: the
   # gateway keeps each binding's ID, which kuloffice's collection balances use.
   gateway-bind:
-    image: ${SIMULATOR_IMAGE:-developerspavs/kulpay-psp-simulator}:${SIMULATOR_TAG:?set SIMULATOR_TAG}
+    image: ${SIMULATOR_IMAGE:-localhost/kulpay-psp-simulator}:${SIMULATOR_TAG:?set SIMULATOR_TAG}
     networks: [kulpay]
     depends_on:
       gateway: { condition: service_healthy }
@@ -251,7 +251,7 @@ services:
   # declines a top-up; Apache must put a password in front of it.
   simulator:
     <<: *restart
-    image: ${SIMULATOR_IMAGE:-developerspavs/kulpay-psp-simulator}:${SIMULATOR_TAG}
+    image: ${SIMULATOR_IMAGE:-localhost/kulpay-psp-simulator}:${SIMULATOR_TAG}
     environment:
       SIMULATOR_ADDR: ":8085"
       SIMULATOR_PUBLIC_URL: ${SIMULATOR_PUBLIC_URL:?set SIMULATOR_PUBLIC_URL}

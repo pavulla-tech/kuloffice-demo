@@ -4,7 +4,7 @@
 # On the server:  make setup, fill .env, make config, make start, make init.
 
 .PHONY: help setup sync-env clean-env-backups config check-images \
-        images push theme license \
+        images push bundle load theme license \
         start start-portal stop restart logs ps update clean reset-blnk \
         init operator solange-kulpay \
         deploy rollback releases status health backup restore
@@ -30,6 +30,7 @@ help:
 	@echo "Images (on the laptop)"
 	@echo "  make images [S=WEB]     build every image (or one) for TARGET_PLATFORM"
 	@echo "  make push [S=WEB]       push them to Docker Hub (docker login first)"
+	@echo "  make bundle [S=…]       build the gateway and simulator into one archive for scp"
 	@echo "  make theme              copy intaka's login theme into theme/ (commit it)"
 	@echo "  make license            print a kuloffice license key (KULOFFICE_DIR/keys)"
 	@echo ""
@@ -39,6 +40,7 @@ help:
 	@echo "  make stop / ps / logs [S=x]"
 	@echo "  make restart [S=x]      recreate everything, or one service (reloads .env)"
 	@echo "  make update             pull the tags in .env and recreate what changed"
+	@echo "  make load FILE=…        load a bundle's images (make bundle on the laptop)"
 	@echo ""
 	@echo "Releases (on the server; CI runs the same tool, bin/kulpay)"
 	@echo "  make deploy U=web T=v0.1.0-alpha02   switch a unit to a tag (health-checked)"
@@ -127,6 +129,26 @@ push: check-images
 	for name in $(or $(S),$(IMAGES)); do \
 		eval "ref=\$${$${name}_IMAGE}:\$${$${name}_TAG}"; echo "== $$ref"; docker push "$$ref"; \
 	done
+
+# Images that never go to a registry (localhost/…): built, saved into one
+# archive under bundles/, copied to the server (scp), loaded there.
+BUNDLED = GATEWAY SIMULATOR
+bundle: check-images
+	@$(MAKE) --no-print-directory images S="$(or $(S),$(BUNDLED))"
+	@set -a; . ./$(ENV_FILE); set +a; set -e; refs=""; name="kulpay-images"; \
+	for n in $(or $(S),$(BUNDLED)); do \
+		eval "ref=\$${$${n}_IMAGE}:\$${$${n}_TAG}"; \
+		case $$ref in localhost/*) ;; *) echo "$$ref is not a localhost/ image; use make push" >&2; exit 1 ;; esac; \
+		refs="$$refs $$ref"; name="$$name-$$(echo $$n | tr A-Z a-z)-$$(echo $$ref | sed 's/.*://')"; \
+	done; \
+	mkdir -p bundles; docker save $$refs | gzip > "bundles/$$name.tar.gz"; \
+	(cd bundles && shasum -a 256 "$$name.tar.gz" > "$$name.tar.gz.sha256"); \
+	echo "bundles/$$name.tar.gz (and .sha256): scp both to the server's deploy/, then make load FILE=$$name.tar.gz"
+
+load:
+	@[ -n "$(FILE)" ] || { echo "usage: make load FILE=kulpay-images-….tar.gz" >&2; exit 2; }
+	@if [ -f "$(FILE).sha256" ]; then sha256sum -c "$(FILE).sha256"; else echo "warning: no $(FILE).sha256 to check against" >&2; fi
+	gunzip -c "$(FILE)" | docker load
 
 # The login theme Keycloak mounts, from intaka's checkout. Commit the result:
 # the server has no intaka checkout.
