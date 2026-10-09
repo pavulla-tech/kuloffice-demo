@@ -171,6 +171,7 @@ services:
     environment:
       GATEWAY_API_KEY: ${GATEWAY_API_KEY:?set GATEWAY_API_KEY}
       GATEWAY_ADMIN_KEY: ${GATEWAY_ADMIN_KEY:?set GATEWAY_ADMIN_KEY}
+      GATEWAY_ENCRYPTION_KEY: ${GATEWAY_ENCRYPTION_KEY:?set GATEWAY_ENCRYPTION_KEY}
     volumes:
       - gateway-config:/config
     entrypoint:
@@ -180,6 +181,10 @@ services:
         for k in "$$GATEWAY_API_KEY" "$$GATEWAY_ADMIN_KEY"; do
           case $$k in *[!0-9a-f]* | "") echo "gateway keys must be hex (openssl rand -hex 32)" >&2; exit 1 ;; esac
         done
+        # Live mode refuses to start without a 32-byte key; say so here, plainly.
+        if [ "$$(printf %s "$$GATEWAY_ENCRYPTION_KEY" | base64 -d 2>/dev/null | wc -c)" -ne 32 ]; then
+          echo "GATEWAY_ENCRYPTION_KEY must be base64 of 32 bytes (openssl rand -base64 32)" >&2; exit 1
+        fi
         umask 022
         cat > /config/kulpay-payments.yaml.tmp <<EOF
         keys:
