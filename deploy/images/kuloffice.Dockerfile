@@ -1,5 +1,6 @@
 # syntax=docker/dockerfile:1
-# kuloffice, from a kuloffice checkout. The license public key is linked in:
+# kuloffice, from a kuloffice checkout, with kuloffice-worker beside it (the
+# instruction worker; the kuloffice-worker compose service runs it). The license public key is linked in:
 # pass it with --build-arg LICENSE_PUBLIC_KEY (the Makefile reads it from the
 # checkout's keys/public.pem.base64), or the binary refuses every license.
 # Compiled on the builder's own platform for the target one: no emulation.
@@ -19,7 +20,8 @@ RUN --mount=type=cache,target=/go/pkg/mod --mount=type=cache,target=/root/.cache
       -X github.com/pavulla-tech/kuloffice/internal/commands.binaryName=kuloffice \
       -X github.com/pavulla-tech/kuloffice/internal/license.publicKey=$LICENSE_PUBLIC_KEY \
       -X github.com/pavulla-tech/kuloffice/internal/license.issuer=$LICENSE_ISSUER" \
-      -o /out/kuloffice ./cmd/kuloffice
+      -o /out/kuloffice ./cmd/kuloffice && \
+    CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -o /out/kuloffice-worker ./cmd/kuloffice-worker
 FROM alpine:3.20
 RUN apk add --no-cache ca-certificates tzdata && adduser -D -u 1000 kuloffice
 COPY --from=build /out/ /usr/local/bin/

@@ -164,6 +164,8 @@ services:
       # The review portal's client (stack/add_portal_client.py).
       PORTAL_URL: http://localhost:${PORTAL_PORT:-3100}
       PORTAL_CLIENT_SECRET: ${PORTAL_CLIENT_SECRET:-kulportal-local-secret}
+      # The instruction worker's client (stack/add_worker_client.py).
+      WORKER_CLIENT_SECRET: ${WORKER_CLIENT_SECRET:-kuloffice-worker-local-secret}
       APP_CLIENT_ID: demo-app
       ADMIN_CLIENT_ID: demo-backend
       ADMIN_CLIENT_SECRET: demo-backend-secret
@@ -191,6 +193,7 @@ services:
         if [ -f /setup/update_existing_realm.py ]; then python3 /setup/update_existing_realm.py; fi
         if [ -f /setup/add_workforce_realm.py ]; then python3 /setup/add_workforce_realm.py; else echo "no workforce realm script in this intaka checkout: reviewer sign-in skipped"; fi
         python3 /stack/add_portal_client.py
+        python3 /stack/add_worker_client.py
         python3 /deploy-tools/solange_console_client.py
         STAFF_EMAIL="$$REVIEWER_EMAIL" SOLANGE_ROLES=admin python3 /deploy-tools/staff_user.py
 
@@ -353,6 +356,37 @@ services:
       KULOFFICE_SOLANGE_WEBHOOK_SECRETS: ${SOLANGE_WEBHOOK_SECRETS:-}
       KULOFFICE_SOLANGE_WEB_URL: ${WEB_URL:-http://localhost:3000}
       KULOFFICE_SOLANGE_PUBLIC_API_URL: http://localhost:${KULOFFICE_PORT:-18080}
+      # Instruction worker policies (JSON list), empty: no remote worker may
+      # register. See kuloffice/docs/instruction-workers.md.
+      KULOFFICE_INSTRUCTION_WORKERS: ${INSTRUCTION_WORKERS:-}
+
+  # ---- Instruction worker (opt-in) --------------------------------------------
+  # Executes accepted transfers, balance queries and fee charges against BLNK.
+  # Off unless asked for: `docker compose --profile kuloffice-worker up -d
+  # kuloffice-worker`. BLNK has no default here, so pointing it at the hosted
+  # BLNK (real ledger mutations) is always a deliberate choice. Needs the
+  # worker client in Keycloak and INSTRUCTION_WORKERS on kuloffice; see
+  # kuloffice/docs/instruction-workers.md.
+  kuloffice-worker:
+    profiles: ["kuloffice-worker"]
+    image: ${KULOFFICE_REF:-kulstack-kuloffice:local}
+    network_mode: service:net
+    restart: unless-stopped
+    entrypoint: ["kuloffice-worker"]
+    command: []
+    depends_on:
+      kuloffice: { condition: service_started }
+    environment:
+      KULOFFICE_WORKER_ADDR: localhost:${KULOFFICE_GRPC_PORT:-50051}
+      KULOFFICE_WORKER_INSECURE: "true" # same network namespace, never over a network
+      KULOFFICE_WORKER_TOKEN_URL: ${KC_PUBLIC:-http://localhost:8080/auth}/realms/${KC_REALM:-demo}/protocol/openid-connect/token
+      KULOFFICE_WORKER_CLIENT_ID: ${WORKER_CLIENT_ID:-kuloffice-worker}
+      KULOFFICE_WORKER_CLIENT_SECRET: ${WORKER_CLIENT_SECRET:-kuloffice-worker-local-secret}
+      KULOFFICE_WORKER_CAPABILITIES: ${WORKER_CAPABILITIES:-}
+      KULOFFICE_WORKER_PROVIDERS: ${WORKER_PROVIDERS:-blnk}
+      KULOFFICE_WORKER_CAPACITY: ${WORKER_CAPACITY:-2}
+      KULOFFICE_ADAPTER_BLNK_BASE_URL: ${WORKER_BLNK_BASE_URL:-}
+      KULOFFICE_ADAPTER_BLNK_BALANCE_PRODUCT_FEES: ${WORKER_BLNK_FEE_BALANCE:-}
 
   # ---- Solange (QR codes), the same image as the server's ---------------------
   # Its database beside kuloffice's, made once (the init script only runs on a
