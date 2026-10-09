@@ -59,7 +59,8 @@ compose run --rm blnk-db-init >/dev/null
 compose up -d blnk-server blnk-worker >/dev/null
 
 tries=0
-until compose exec -T blnk-server sh -ec 'wget -q --header="X-Blnk-Key: $BLNK_SERVER_SECRET_KEY" --spider http://127.0.0.1:5001/' >/dev/null 2>&1; do
+# BLNK answers 404 at /; listing one ledger proves the key and the database.
+until compose exec -T blnk-server sh -ec 'wget -q -O /dev/null --header="X-Blnk-Key: $BLNK_SERVER_SECRET_KEY" "http://127.0.0.1:5001/ledgers?limit=1&offset=0"' >/dev/null 2>&1; do
   tries=$((tries + 1))
   if [ "$tries" -ge 60 ]; then
     compose logs --tail=100 blnk-server blnk-worker >&2
