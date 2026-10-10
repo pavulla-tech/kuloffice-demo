@@ -446,7 +446,7 @@ portal_setup() {
     [[ -n $(env_get "$name" || true) ]] || env_set "$name" "$(head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n')"
   done
   say "the portal's client in the workforce realm"
-  compose --profile tools run --rm tools sh -c \
+  compose --profile tools run --rm tools -c \
     'KC_BOOTSTRAP_ADMIN_USERNAME="${KC_ADMIN_USER:-admin}" KC_BOOTSTRAP_ADMIN_PASSWORD="$KC_ADMIN_PASSWORD" PORTAL_URL="$KULPORTAL_PUBLIC_URL" PORTAL_CLIENT_SECRET="$KULPORTAL_CLIENT_SECRET" python3 /stack/add_portal_client.py'
 }
 
