@@ -8,7 +8,8 @@ Basic), each step only if it is not done yet:
   1. find the user's subject in the workforce realm;
   2. create the operator and activate it;
   3. bind the user (workforce identity provider + subject) to it;
-  4. create the local reviewer role and grant it.
+  4. create the local reviewer role and grant it (and, with
+     REVIEWER_ADMIN_ROLE, the admin role: the whole permission catalogue).
 
 It must run before the reviewer's first sign-in: an unbound identity signing
 in becomes a customer, and kuloffice never turns a customer into an operator.
@@ -47,6 +48,11 @@ PRODUCT_PERMISSIONS = [
     ("product_definition", "read"), ("product_definition", "create"), ("product_definition", "update"),
     ("product_definition", "publish"), ("product_definition", "retire"),
 ]
+
+# An admin (make operator ADMIN=1): every permission in kuloffice's catalogue,
+# read live and re-applied on every run, so permissions kuloffice adds later
+# reach admins too. Empty: no admin role.
+ADMIN_ROLE = os.environ.get("REVIEWER_ADMIN_ROLE", "").strip()
 
 
 def call(base, method, path, body=None, form=None, auth=None):
@@ -133,20 +139,31 @@ def main():
         (ROLE, "KYC reviewers", PERMISSIONS),
         (PRODUCT_ROLE, "Conta Pagamento back office", PRODUCT_PERMISSIONS),
     ):
-        ensure_role(kuloffice, op, name, description, permissions)
+        if name:  # an empty ROLE (make operator ROLE= ADMIN=1): no KYC role
+            ensure_role(kuloffice, op, name, description, permissions)
+    if ADMIN_ROLE:
+        catalogue = must(kuloffice("GET", "/v1/operator-permissions"), "list permissions").get("permissions", [])
+        ensure_role(kuloffice, op, ADMIN_ROLE, "Every permission in the catalogue",
+                    [(p["resource"], p["action"]) for p in catalogue], current=True)
     print(f"reviewer ready: {EMAIL}")
 
 
-def ensure_role(kuloffice, op, name, description, permissions):
-    """Creates the role once and grants it to the operator once."""
+def ensure_role(kuloffice, op, name, description, permissions, current=False):
+    """Creates the role once and grants it to the operator once. With current,
+    an existing role's permissions are brought in line with these."""
     roles = must(kuloffice("GET", "/v1/operator-roles"), "list roles").get("roles", [])
     role = next((r for r in roles if r.get("name") == name), None)
+    wanted = [{"resource": r, "action": a} for r, a in permissions]
     if not role:
         role = must(kuloffice("POST", "/v1/operator-roles", {
-            "name": name, "description": description,
-            "permissions": [{"resource": r, "action": a} for r, a in permissions],
+            "name": name, "description": description, "permissions": wanted,
         }), f"create role {name}")
         print(f"role '{name}' created")
+    elif current and {(p["resource"], p["action"]) for p in role.get("permissions", [])} != set(permissions):
+        role = must(kuloffice("POST", f"/v1/operator-roles/{role['id']}", {
+            "description": description, "permissions": wanted, "reason": REASON,
+        }), f"update role {name}")
+        print(f"role '{name}' updated to {len(wanted)} permissions")
     held = must(kuloffice("GET", f"/v1/operators/{op['id']}/roles"), "list assignments").get("roles", [])
     if not any(r.get("id") == role["id"] for r in held):
         must(kuloffice("POST", f"/v1/operators/{op['id']}/roles/{role['id']}", {"grant": True, "reason": REASON}),

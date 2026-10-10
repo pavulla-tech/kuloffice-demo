@@ -142,12 +142,20 @@ purpose.
 make operator EMAIL=ana@pavulla.com FIRST=Ana LAST=Macuacua                 # a KYC reviewer
 make operator EMAIL=rui@pavulla.com FIRST=Rui LAST=Lopes SOLANGE=developer   # also in Solange
 make operator EMAIL=eva@pavulla.com FIRST=Eva LAST=Sitoe ROLE= SOLANGE=viewer # Solange only
+make operator EMAIL=ze@pavulla.com FIRST=Zé LAST=Tembe ADMIN=1 SOLANGE=admin   # an admin, everywhere
 ```
 
 - **The account:** a workforce account with a temporary password (printed
   once, changed at the first sign-in).
 - **`ROLE`** (default `Revisores`, KYC review permissions): a kuloffice
-  operator bound to the account, holding that role.
+  operator bound to the account, holding that role and the Conta Pagamento
+  back-office role (`Produtos (local)`).
+- **`ADMIN=1`:** also `Administradores` (`ADMIN_ROLE`): every permission in
+  kuloffice's catalogue, read from `GET /v1/operator-permissions` and
+  re-applied on every run, so permissions added later reach admins once
+  `make operator` runs again. `ROLE= ADMIN=1` leaves out the KYC role.
+  Creating or editing roles stays with the env-admin; an admin can grant only
+  roles whose permissions they hold, never to themselves.
 - **`SOLANGE`:** console roles, any of `viewer`, `developer`, `admin`.
 
 **6. QR codes** (kuloffice through Solange):

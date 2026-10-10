@@ -54,7 +54,8 @@ help:
 	@echo ""
 	@echo "Provisioning (on the server, after start)"
 	@echo "  make init               realms, clients, kuloffice license and identity providers"
-	@echo "  make operator EMAIL=… FIRST=… LAST=… [ROLE=Revisores] [SOLANGE=viewer,developer]"
+	@echo "  make operator EMAIL=… FIRST=… LAST=… [ROLE=Revisores] [ADMIN=1] [SOLANGE=viewer,developer]"
+	@echo "                          ADMIN=1: also the Administradores role (every kuloffice permission)"
 	@echo "                          a staff account; ROLE= (empty) for Solange only"
 	@echo "  make solange-kulpay     KulPay's app in Solange, kuloffice's key and webhook (into .env)"
 
@@ -208,10 +209,14 @@ init:
 
 ROLE ?= Revisores
 SOLANGE ?=
+# ADMIN=1 also grants ADMIN_ROLE: every permission in kuloffice's catalogue.
+ADMIN ?=
+ADMIN_ROLE ?= Administradores
 operator:
-	@[ -n "$(EMAIL)" ] || { echo "usage: make operator EMAIL=… FIRST=… LAST=… [ROLE=Revisores] [SOLANGE=viewer]" >&2; exit 1; }
+	@[ -n "$(EMAIL)" ] || { echo "usage: make operator EMAIL=… FIRST=… LAST=… [ROLE=Revisores] [ADMIN=1] [SOLANGE=viewer]" >&2; exit 1; }
 	$(COMPOSE) --profile tools run --rm -e STAFF_EMAIL="$(EMAIL)" -e STAFF_FIRST_NAME="$(FIRST)" -e STAFF_LAST_NAME="$(LAST)" \
-		-e KULOFFICE_ROLE="$(ROLE)" -e SOLANGE_ROLES="$(SOLANGE)" tools /tools/operator.sh
+		-e KULOFFICE_ROLE="$(ROLE)" -e KULOFFICE_ADMIN_ROLE="$(if $(ADMIN),$(ADMIN_ROLE))" -e SOLANGE_ROLES="$(SOLANGE)" \
+		tools /tools/operator.sh
 
 # KulPay's app in Solange, kuloffice's key and the webhook to kuloffice, each
 # step only if missing; the secrets go straight into .env, then kuloffice is
