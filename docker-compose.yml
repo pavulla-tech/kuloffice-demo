@@ -335,6 +335,9 @@ services:
       KULOFFICE_KEYCLOAK_CLIENT_ID: ${KC_BACKEND_CLIENT:-demo-backend}
       KULOFFICE_KEYCLOAK_CLIENT_SECRET: ${KC_BACKEND_SECRET:-demo-backend-secret}
       KULOFFICE_KEYCLOAK_ONBOARDING_ROLE: onboarding_pending
+      # Staff tokens from this realm never become customers; an operator added
+      # without a binding is bound at first sign-in by their verified email.
+      KULOFFICE_AUTH_WORKFORCE_ISSUERS: ${KC_WORKFORCE_ISSUER:-http://localhost:8080/auth/realms/workforce}
       # The dev inbox, never the real gateway (whose credentials are the
       # config defaults).
       KULOFFICE_SMS_BASE_URL: http://sms-inbox:8080/api/dev/sms

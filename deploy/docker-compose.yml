@@ -416,6 +416,9 @@ services:
       KULOFFICE_KEYCLOAK_CLIENT_ID: ${ADMIN_CLIENT_ID:-kulpay-backend}
       KULOFFICE_KEYCLOAK_CLIENT_SECRET: ${ADMIN_CLIENT_SECRET:?set ADMIN_CLIENT_SECRET}
       KULOFFICE_KEYCLOAK_ONBOARDING_ROLE: ${ONBOARDING_ROLE:-onboarding_pending}
+      # Staff tokens from this realm never become customers; an operator added
+      # in the portal is bound at first sign-in by their verified email.
+      KULOFFICE_AUTH_WORKFORCE_ISSUERS: ${KEYCLOAK_PUBLIC_URL}/realms/${WORKFORCE_REALM:-workforce}
       KULOFFICE_SMS_BASE_URL: ${OLA_SMS_BASE_URL}
       KULOFFICE_SMS_API_KEY: ${OLA_SMS_API_KEY}
       KULOFFICE_SMS_PROVIDER_ID: ${OLA_SMS_PROVIDER_ID}
