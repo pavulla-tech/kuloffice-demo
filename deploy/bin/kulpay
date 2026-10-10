@@ -180,18 +180,20 @@ prune_images() {
   done
 }
 
-# The login theme Keycloak mounts, copied out of the image it runs.
+# The mobile login theme Keycloak mounts (kulpay-mobile), copied out of the
+# image it runs. Images from before it had its own name carry it as
+# themes/kulpay, which then also hides the web theme: deploy a newer one.
 theme_from_image() {
-  local image cid dir=$STATE/theme
+  local image cid dir=$STATE/theme name=kulpay-mobile
   image=$(env_get KEYCLOAK_IMAGE):$1
-  mkdir -p "$dir"; rm -rf "$dir/kulpay.new"
+  mkdir -p "$dir"; rm -rf "$dir/$name.new"
   cid=$(docker create "$image")
-  if docker cp "$cid:/opt/keycloak/themes/kulpay" "$dir/kulpay.new" 2> /dev/null; then
-    chmod -R a+rX "$dir/kulpay.new"
-    rm -rf "$dir/kulpay.prev"
-    [[ -d $dir/kulpay ]] && mv "$dir/kulpay" "$dir/kulpay.prev"
-    mv "$dir/kulpay.new" "$dir/kulpay"
-    env_set KEYCLOAK_THEME_DIR ./state/theme/kulpay
+  if docker cp "$cid:/opt/keycloak/themes/$name" "$dir/$name.new" 2> /dev/null; then
+    chmod -R a+rX "$dir/$name.new"
+    rm -rf "$dir/$name.prev"
+    [[ -d $dir/$name ]] && mv "$dir/$name" "$dir/$name.prev"
+    mv "$dir/$name.new" "$dir/$name"
+    env_set KEYCLOAK_THEME_DIR "./state/theme/$name"
     say "login theme: from $image"
   else
     say "login theme: $image has none; keeping $(env_get KEYCLOAK_THEME_DIR || true)"
