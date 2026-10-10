@@ -49,7 +49,7 @@ PRODUCT_PERMISSIONS = [
     ("product_definition", "publish"), ("product_definition", "retire"),
 ]
 
-# An admin (make operator ADMIN=1): every permission in kuloffice's catalogue,
+# An admin (make operator ROLE=ADMIN): every permission in kuloffice's catalogue,
 # read live and re-applied on every run, so permissions kuloffice adds later
 # reach admins too. Empty: no admin role.
 ADMIN_ROLE = os.environ.get("REVIEWER_ADMIN_ROLE", "").strip()
@@ -139,7 +139,7 @@ def main():
         (ROLE, "KYC reviewers", PERMISSIONS),
         (PRODUCT_ROLE, "Conta Pagamento back office", PRODUCT_PERMISSIONS),
     ):
-        if name:  # an empty ROLE (make operator ROLE= ADMIN=1): no KYC role
+        if name:  # empty: that role is not wanted (an admin needs neither)
             ensure_role(kuloffice, op, name, description, permissions)
     if ADMIN_ROLE:
         catalogue = must(kuloffice("GET", "/v1/operator-permissions"), "list permissions").get("permissions", [])
