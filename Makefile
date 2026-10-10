@@ -10,7 +10,7 @@
 #
 # Settings are in stack.env (created from stack.env.example on first use).
 
-.PHONY: help up plan where down restart rebuild logs ps urls bootstrap realm buckets reviewer review kuloffice sms ussd-test db psql \
+.PHONY: help up plan where down restart rebuild logs ps urls bootstrap realm buckets reviewer review closure kuloffice sms ussd-test db psql \
         keys license config clean legacy-stop
 
 # Creates stack.env first if it is missing, with its own web session secret.
@@ -49,7 +49,8 @@ COMPOSE = LICENSE_PUBLIC_KEY="$$(cat $(KEYS)/public.pem.base64 2>/dev/null)" \
 
 # Where each switchable service comes from (see stack.env.example). Passed to
 # stack/resolve.sh with the settings it needs.
-RESOLVE_VARS = KEYCLOAK PRESET KULOFFICE WEB FILESERVER STACK_NAME STACK_BIND KC_PORT KULOFFICE_PORT KULOFFICE_GRPC_PORT \
+RESOLVE_VARS = KEYCLOAK PRESET PANEL KULOFFICE WEB FILESERVER STACK_NAME STACK_BIND KC_PORT KULOFFICE_PORT KULOFFICE_GRPC_PORT \
+	PORTAL_PORT PORTAL_DIR SOLANGE_PORT SOLANGE_TAG SOLANGE_CONSOLE_PORT \
 	WEB_PORT PANEL_PORT SMS_INBOX_PORT FILESERVER_PORT MINIO_PORT MINIO_CONSOLE_PORT DB_PORT \
 	INTAKA_DIR KULOFFICE_DIR WEB_DIR FILESERVER_DIR WORKFORCE_API_SECRET REVIEWER_EMAIL \
 	SERVER_KEYCLOAK_URL SERVER_KULOFFICE_URL SERVER_WEB_URL SERVER_REALM SERVER_ADMIN_CLIENT_SECRET \
@@ -61,8 +62,10 @@ S ?=
 
 help:
 	@echo "make up              build, start and configure the stack (what stack.env says is local)"
-	@echo "make up PRESET=web|kuloffice|local    web: only the web app here; kuloffice: web + kuloffice"
-	@echo "                     here, Keycloak on the server; local: everything here"
+	@echo "make up PRESET=web|kuloffice|backend|local    web: only the web app here; kuloffice: web +"
+	@echo "                     kuloffice here, Keycloak on the server; backend: only kuloffice here; local: all"
+	@echo "                     (with ../kulportal2, a local Keycloak and kuloffice also run the review portal)"
+	@echo "                     PANEL=on adds the token panel when Keycloak is on the server"
 	@echo "make up WEB=build KULOFFICE=server KEYCLOAK=v0.1.0-alpha03 …   any mix, for one run"
 	@echo "                     (build | a Docker Hub tag | release | server)"
 	@echo "make plan [X=…]      what make up would run here and use on the server (starts nothing)"
@@ -78,6 +81,8 @@ help:
 	@echo "make reviewer        re-run the demo reviewer's seeding (operator, identity, role)"
 	@echo "make review ACCOUNT=acc_... [OUTCOME=approve|reject|request_documents] [MESSAGE=...] [DOCS=TYPE:text;...]"
 	@echo "                     decide an account's KYC review as the demo reviewer"
+	@echo "make closure [ACCOUNT=acc_... [OUTCOME=approve|reject] [REASON=...]]"
+	@echo "                     list Conta Pagamento closure requests, or decide one as the demo reviewer"
 	@echo "make kuloffice       recreate kuloffice with stack.kuloffice.env (MiniAiLive etc.)"
 	@echo "make sms             print the dev SMS inbox (OTP codes, kuloffice SMS)"
 	@echo "make ussd-test       drive intaka's USSD channel end to end against this stack's Keycloak"
@@ -122,7 +127,8 @@ up: stack.env keys plan
 			code=$$(docker inspect -f '{{.State.ExitCode}}' $$id); \
 			if [ "$$code" != "0" ]; then echo "$$1 failed (exit $$code)" >&2; exit 1; fi; }; \
 		if [ "$$STACK_KULOFFICE_LOCAL" = yes ]; then echo "Configuring kuloffice…"; wait_for bootstrap; fi; \
-		if [ "$$STACK_SEED" = yes ]; then wait_for reviewer-seed; fi
+		if [ "$$STACK_SEED" = yes ]; then wait_for reviewer-seed; fi; \
+		if [ "$$STACK_QR" = local ]; then STACK_NAME=$(STACK_NAME) KULOFFICE_PORT=$(KULOFFICE_PORT) SOLANGE_PORT=$(SOLANGE_PORT) sh stack/solange-setup.sh; fi
 	@$(MAKE) --no-print-directory where
 
 # What the last make up runs here and what it uses on the server.
@@ -130,9 +136,11 @@ where:
 	@[ -f .stack/where.txt ] || { echo "nothing yet: make up" >&2; exit 1; }
 	@echo ""
 	@cat .stack/where.txt
-	@echo "token     http://localhost:$(PANEL_PORT)   panel; sign in to whichever Keycloak above"
+	@set -a; . ./$(RESOLVED); set +a; case ",$$COMPOSE_PROFILES," in *,panel,*) \
+		echo "token     http://localhost:$(PANEL_PORT)   panel; sign in to whichever Keycloak above";; esac
+	@set -a; . ./$(RESOLVED); set +a; case ",$$COMPOSE_PROFILES," in *,inbox,*) \
+		echo "sms       http://localhost:$(SMS_INBOX_PORT)/api/dev/inbox   codes from this laptop's Keycloak and kuloffice (make sms)";; esac
 	@set -a; . ./$(RESOLVED); set +a; case ",$$COMPOSE_PROFILES," in *,base,*) \
-		echo "sms       http://localhost:$(SMS_INBOX_PORT)/api/dev/inbox   codes from this laptop's Keycloak and kuloffice (make sms)"; \
 		echo "postgres  localhost:$(DB_PORT)   kuloffice / kuloffice (make psql)";; esac
 	@set -a; . ./$(RESOLVED); set +a; case ",$$COMPOSE_PROFILES," in *,keycloak,*) \
 		echo "admin     http://localhost:$(KC_PORT)/auth/admin   admin / admin   realm: demo";; esac
@@ -180,6 +188,14 @@ review:
 		REVIEWER_EMAIL="$(REVIEWER_EMAIL)" REVIEWER_PASSWORD="$(REVIEWER_PASSWORD)" \
 		ACCOUNT="$(ACCOUNT)" OUTCOME="$(OUTCOME)" REASON="$(REASON)" MESSAGE="$(MESSAGE)" DOCS="$(DOCS)" \
 		python3 stack/review.py
+
+# Conta Pagamento closure requests, as the demo reviewer (see stack/closure.py).
+closure:
+	@PANEL_URL=http://localhost:$(PANEL_PORT) KULOFFICE_URL=http://localhost:$(KULOFFICE_PORT) \
+		WORKFORCE_ISSUER=http://localhost:$(KC_PORT)/auth/realms/workforce \
+		REVIEWER_EMAIL="$(REVIEWER_EMAIL)" REVIEWER_PASSWORD="$(REVIEWER_PASSWORD)" \
+		ACCOUNT="$(ACCOUNT)" OUTCOME="$(OUTCOME)" REASON="$(REASON)" \
+		python3 stack/closure.py
 
 # A plain restart keeps the old environment; settings need a new container.
 kuloffice:

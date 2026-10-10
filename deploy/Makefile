@@ -4,8 +4,8 @@
 # On the server:  make setup, fill .env, make config, make start, make init.
 
 .PHONY: help setup sync-env clean-env-backups config check-images \
-        images push theme license \
-        start start-portal stop restart logs ps update clean \
+        images push bundle load theme license \
+        start start-portal stop restart logs ps update clean reset-blnk \
         init operator solange-kulpay \
         deploy rollback releases status health backup restore
 
@@ -17,7 +17,7 @@ COMPOSE = ENV_FILE=$(ENV_FILE) docker compose --env-file $(ENV_FILE)
 S ?=
 
 # Every image `make images` builds, by its .env prefix.
-IMAGES = KEYCLOAK KULOFFICE WEB FILESERVER TOKEN_PANEL TOOLS SOLANGE SOLANGE_CONSOLE
+IMAGES = KEYCLOAK KULOFFICE WEB FILESERVER TOKEN_PANEL TOOLS SOLANGE SOLANGE_CONSOLE GATEWAY SIMULATOR
 
 help:
 	@echo "Setup"
@@ -30,6 +30,7 @@ help:
 	@echo "Images (on the laptop)"
 	@echo "  make images [S=WEB]     build every image (or one) for TARGET_PLATFORM"
 	@echo "  make push [S=WEB]       push them to Docker Hub (docker login first)"
+	@echo "  make bundle [S=…]       build the gateway and simulator into one archive for scp"
 	@echo "  make theme              copy intaka's login theme into theme/ (commit it)"
 	@echo "  make license            print a kuloffice license key (KULOFFICE_DIR/keys)"
 	@echo ""
@@ -39,6 +40,7 @@ help:
 	@echo "  make stop / ps / logs [S=x]"
 	@echo "  make restart [S=x]      recreate everything, or one service (reloads .env)"
 	@echo "  make update             pull the tags in .env and recreate what changed"
+	@echo "  make load FILE=…        load a bundle's images (make bundle on the laptop)"
 	@echo ""
 	@echo "Releases (on the server; CI runs the same tool, bin/kulpay)"
 	@echo "  make deploy U=web T=v0.1.0-alpha02   switch a unit to a tag (health-checked)"
@@ -48,6 +50,7 @@ help:
 	@echo "  make health [U=web]     check the running units"
 	@echo "  make backup DB=kuloffice / make restore DB=kuloffice FILE=… YES=1"
 	@echo "  make clean              remove containers AND volumes (every database)"
+	@echo "  make reset-blnk YES=DESTROY  back up and rebuild only BLNK's complete ledger"
 	@echo ""
 	@echo "Provisioning (on the server, after start)"
 	@echo "  make init               realms, clients, kuloffice license and identity providers"
@@ -102,6 +105,10 @@ build_TOOLS           = docker build --platform $$TARGET_PLATFORM -t "$$TOOLS_IM
 build_SOLANGE         = docker build --platform $$TARGET_PLATFORM -t "$$SOLANGE_IMAGE:$$SOLANGE_TAG" -f images/solange.Dockerfile "$$SOLANGE_DIR"
 build_SOLANGE_CONSOLE = docker build --platform $$TARGET_PLATFORM -t "$$SOLANGE_CONSOLE_IMAGE:$$SOLANGE_CONSOLE_TAG" -f images/solange-console.Dockerfile "$$SOLANGE_DIR/console"
 build_KULPORTAL       = docker build --platform $$TARGET_PLATFORM -t "$$KULPORTAL_IMAGE:$$KULPORTAL_TAG" "$$KULPORTAL_DIR"
+# The payments gateway and the PSP simulator build from their repositories' own
+# Dockerfiles.
+build_GATEWAY         = docker build --platform $$TARGET_PLATFORM -t "$$GATEWAY_IMAGE:$$GATEWAY_TAG" "$$GATEWAY_DIR"
+build_SIMULATOR       = docker build --platform $$TARGET_PLATFORM -t "$$SIMULATOR_IMAGE:$$SIMULATOR_TAG" "$$SIMULATOR_DIR"
 
 images: check-images
 	@set -a; . ./$(ENV_FILE); set +a; set -e; \
@@ -112,6 +119,7 @@ images: check-images
 		KEYCLOAK) $(build_KEYCLOAK) ;; KULOFFICE) $(build_KULOFFICE) ;; WEB) $(build_WEB) ;; \
 		FILESERVER) $(build_FILESERVER) ;; TOKEN_PANEL) $(build_TOKEN_PANEL) ;; TOOLS) $(build_TOOLS) ;; \
 		SOLANGE) $(build_SOLANGE) ;; SOLANGE_CONSOLE) $(build_SOLANGE_CONSOLE) ;; KULPORTAL) $(build_KULPORTAL) ;; \
+		GATEWAY) $(build_GATEWAY) ;; SIMULATOR) $(build_SIMULATOR) ;; \
 		*) echo "unknown image $$name" >&2; exit 1 ;; \
 		esac; \
 	done
@@ -121,6 +129,26 @@ push: check-images
 	for name in $(or $(S),$(IMAGES)); do \
 		eval "ref=\$${$${name}_IMAGE}:\$${$${name}_TAG}"; echo "== $$ref"; docker push "$$ref"; \
 	done
+
+# Images that never go to a registry (localhost/…): built, saved into one
+# archive under bundles/, copied to the server (scp), loaded there.
+BUNDLED = GATEWAY SIMULATOR
+bundle: check-images
+	@$(MAKE) --no-print-directory images S="$(or $(S),$(BUNDLED))"
+	@set -a; . ./$(ENV_FILE); set +a; set -e; refs=""; name="kulpay-images"; \
+	for n in $(or $(S),$(BUNDLED)); do \
+		eval "ref=\$${$${n}_IMAGE}:\$${$${n}_TAG}"; \
+		case $$ref in localhost/*) ;; *) echo "$$ref is not a localhost/ image; use make push" >&2; exit 1 ;; esac; \
+		refs="$$refs $$ref"; name="$$name-$$(echo $$n | tr A-Z a-z)-$$(echo $$ref | sed 's/.*://')"; \
+	done; \
+	mkdir -p bundles; docker save $$refs | gzip > "bundles/$$name.tar.gz"; \
+	(cd bundles && shasum -a 256 "$$name.tar.gz" > "$$name.tar.gz.sha256"); \
+	echo "bundles/$$name.tar.gz (and .sha256): scp both to the server's deploy/, then make load FILE=$$name.tar.gz"
+
+load:
+	@[ -n "$(FILE)" ] || { echo "usage: make load FILE=kulpay-images-….tar.gz" >&2; exit 2; }
+	@if [ -f "$(FILE).sha256" ]; then sha256sum -c "$(FILE).sha256"; else echo "warning: no $(FILE).sha256 to check against" >&2; fi
+	gunzip -c "$(FILE)" | docker load
 
 # The login theme Keycloak mounts, from intaka's checkout. Commit the result:
 # the server has no intaka checkout.
@@ -167,6 +195,11 @@ clean:
 	@printf 'This deletes every database and every stored file. Type DESTROY to continue: '; \
 	read answer; [ "$$answer" = "DESTROY" ] || { echo "aborted"; exit 1; }
 	$(COMPOSE) --profile portal --profile tools down -v
+
+# Development/installation reset for the financial core. This is intentionally
+# whole-database replacement: no partial ledger cleanup or additive repair.
+reset-blnk:
+	@ENV_FILE="$(ENV_FILE)" YES="$(YES)" sh scripts/reset-blnk.sh
 
 # ── provisioning (server) ─────────────────────────────────────────────────────
 
@@ -217,4 +250,3 @@ backup:
 restore:
 	@[ -n "$(DB)" ] && [ -n "$(FILE)" ] || { echo "usage: make restore DB=<database> FILE=<backup> YES=1" >&2; exit 1; }
 	@$(KULPAY) restore $(DB) $(FILE) $(if $(YES),--yes)
-

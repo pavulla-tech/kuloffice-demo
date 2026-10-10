@@ -6,3 +6,4 @@ geoip/*
 !geoip/.gitkeep
 state/
 .ci.env
+bundles/

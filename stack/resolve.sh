@@ -7,7 +7,9 @@
 #   release   the newest v* tag on Docker Hub, run here
 #   server    not run here: the deployed one is used (SERVER_* settings)
 #
-# PRESET=web|kuloffice|local sets all three at once and wins over them.
+# PRESET=web|kuloffice|backend|local sets all three at once and wins over them.
+# PANEL=on also runs the token panel when Keycloak isn't local (it always
+# runs with a local Keycloak).
 #
 # Writes .stack/resolved.env (compose reads it after stack.env) and
 # .stack/where.txt (make where), pulls the tagged images, and refuses the
@@ -21,8 +23,9 @@ case ${PRESET:-} in
   "") ;;
   web) KEYCLOAK=server KULOFFICE=server WEB=build ;;
   kuloffice) KEYCLOAK=server KULOFFICE=build WEB=build ;;
+  backend) KEYCLOAK=server KULOFFICE=build WEB=server ;;
   local) KEYCLOAK=build KULOFFICE=build WEB=build ;;
-  *) die "PRESET=$PRESET: web, kuloffice or local" ;;
+  *) die "PRESET=$PRESET: web, kuloffice, backend or local" ;;
 esac
 KEYCLOAK=${KEYCLOAK:-build} KULOFFICE=${KULOFFICE:-build} WEB=${WEB:-build} FILESERVER=${FILESERVER:-build}
 STACK_NAME=${STACK_NAME:-kulstack} KC_PORT=${KC_PORT:-8080} KULOFFICE_PORT=${KULOFFICE_PORT:-18080} WEB_PORT=${WEB_PORT:-3000}
@@ -122,25 +125,45 @@ if local_ "$KULOFFICE"; then
   if local_ "$KEYCLOAK" || { [ -n "$KC_ADMIN_PASSWORD" ] && [ -n "$SEED_EMAIL" ]; }; then SEED=yes; fi
 fi
 
-# QR codes for a local kuloffice, through the server's Solange (optional).
-SOLANGE_BASE= SOLANGE_KEY=
+# QR codes for a local kuloffice: the server's Solange with SOLANGE_API_KEY,
+# otherwise a local one. Its key and webhook secret come from
+# stack/solange-setup.sh (.stack/solange.env), issued on the first make up.
+SOLANGE_BASE= SOLANGE_KEY= SOLANGE_WEBHOOK_SECRETS= QR=off
 if local_ "$KULOFFICE" && [ -n "${SOLANGE_API_KEY:-}" ]; then
-  SOLANGE_BASE=${SOLANGE_URL:-https://qr.kulpay.pavulla.com} SOLANGE_KEY=$SOLANGE_API_KEY
+  SOLANGE_BASE=${SOLANGE_URL:-https://qr.kulpay.pavulla.com} SOLANGE_KEY=$SOLANGE_API_KEY QR=server
+elif local_ "$KULOFFICE"; then
+  QR=local SOLANGE_BASE=http://localhost:${SOLANGE_PORT:-8094}
+  if [ -f .stack/solange.env ]; then
+    SOLANGE_KEY=$(sed -n 's/^SOLANGE_KEY=//p' .stack/solange.env)
+    SOLANGE_WEBHOOK_SECRETS=$(sed -n 's/^SOLANGE_WEBHOOK_SECRETS=//p' .stack/solange.env)
+  fi
 fi
 
 # ── profiles: what runs here; what to stop and build ─────────────────────────
 profiles="" stop="" build=""
 add() { case " $profiles " in *" $2 "*) ;; *) profiles="${profiles:+$profiles }$2" ;; esac; }
-if local_ "$KEYCLOAK"; then add _ keycloak; add _ base; else stop="$stop keycloak realm-setup"; fi
+# The SMS inbox catches the local Keycloak's codes; the token panel signs in
+# to it. Neither runs for the server's Keycloak unless asked (PANEL=on).
+if local_ "$KEYCLOAK"; then add _ keycloak; add _ base; add _ inbox; add _ panel; else stop="$stop keycloak realm-setup sms-inbox"; fi
+if [ "${PANEL:-}" = on ]; then add _ panel; fi
+case " $profiles " in *" panel "*) ;; *) stop="$stop token-panel" ;; esac
 if local_ "$KULOFFICE"; then add _ kuloffice; add _ base; else stop="$stop kuloffice bootstrap fileserver minio minio-init"; fi
+if [ "$QR" = local ]; then add _ qr; else stop="$stop solange solange-console solange-migrate solange-db"; fi
 if local_ "$WEB"; then add _ web; else stop="$stop web"; fi
 if [ "$SEED" = yes ]; then add _ seed; else stop="$stop reviewer-seed"; fi
-case " $profiles " in *" base "*) ;; *) stop="$stop db sms-inbox" ;; esac
+# The review portal needs the local staff realm and kuloffice, and its checkout.
+PORTAL=off
+if local_ "$KEYCLOAK" && local_ "$KULOFFICE" && [ -d "${PORTAL_DIR:-../kulportal2}" ]; then
+  PORTAL=on; add _ portal; build="$build portal"
+else
+  stop="$stop portal"
+fi
+case " $profiles " in *" base "*) ;; *) stop="$stop db" ;; esac
 [ "$KEYCLOAK" != build ] || build="$build keycloak"
 [ "$KULOFFICE" != build ] || build="$build kuloffice"
 [ "$WEB" != build ] || build="$build web"
 if local_ "$KULOFFICE" && [ "$FILESERVER" = build ]; then build="$build fileserver"; fi
-case " $profiles " in *" base "*) build="$build sms-inbox" ;; esac
+case " $profiles " in *" inbox "*) build="$build sms-inbox" ;; esac
 
 # Tagged images, pulled now so a missing tag stops here.
 for ref in "$KEYCLOAK_REF:$KEYCLOAK" "$KULOFFICE_REF:$KULOFFICE" "$WEB_REF:$WEB" "$FILESERVER_REF:$FILESERVER"; do
@@ -184,10 +207,12 @@ API_URL=$API_URL
 WEB_URL=$WEB_URL
 SOLANGE_BASE=$SOLANGE_BASE
 SOLANGE_KEY=$SOLANGE_KEY
+SOLANGE_WEBHOOK_SECRETS=$SOLANGE_WEBHOOK_SECRETS
+STACK_QR=$QR
 EOF
 # Ports and the image prefix, so `make up WEB_PORT=…` reaches compose too.
 for v in STACK_NAME STACK_BIND KC_PORT KULOFFICE_PORT KULOFFICE_GRPC_PORT WEB_PORT PANEL_PORT SMS_INBOX_PORT \
-  FILESERVER_PORT MINIO_PORT MINIO_CONSOLE_PORT DB_PORT; do
+  FILESERVER_PORT MINIO_PORT MINIO_CONSOLE_PORT DB_PORT PORTAL_PORT SOLANGE_PORT SOLANGE_CONSOLE_PORT; do
   eval "val=\${$v:-}"
   [ -z "$val" ] || printf '%s=%s\n' "$v" "$val" >> .stack/resolved.env
 done
@@ -197,9 +222,17 @@ chmod 600 .stack/resolved.env
   printf '%-10s %-38s %s\n' keycloak "$KC_PUBLIC" "$(source_of keycloak "$KEYCLOAK" "${INTAKA_DIR:-../keycloak-phone-authenticator}")"
   printf '%-10s %-38s %s\n' kuloffice "$API_URL" "$(source_of kuloffice "$KULOFFICE" "${KULOFFICE_DIR:-../kuloffice}")"
   printf '%-10s %-38s %s\n' web "$WEB_URL" "$(source_of web "$WEB" "${WEB_DIR:-../kulpay-web}")"
+  if [ "$PORTAL" = on ]; then
+    printf '%-10s %-38s %s\n' portal "http://localhost:${PORTAL_PORT:-3100}" "build (${PORTAL_DIR:-../kulportal2})"
+  fi
   if local_ "$KULOFFICE"; then
     printf '%-10s %-38s %s\n' fileserver "http://localhost:${FILESERVER_PORT:-8082}" "$(source_of fileserver "$FILESERVER" "${FILESERVER_DIR:-../boquisso-fileserver}")"
-    printf '%-10s %-38s %s\n' solange "${SOLANGE_BASE:-off}" "${SOLANGE_BASE:+server (SOLANGE_API_KEY)}"
+    case $QR in
+      local) printf '%-10s %-38s %s\n' solange "$SOLANGE_BASE" "Docker Hub (${SOLANGE_TAG:-2026.10.03-1}), test mode"
+             printf '%-10s %-38s %s\n' console "http://localhost:${SOLANGE_CONSOLE_PORT:-8095}" "Solange's console, as the reviewer" ;;
+      server) printf '%-10s %-38s %s\n' solange "$SOLANGE_BASE" "server (SOLANGE_API_KEY)" ;;
+      *) printf '%-10s %-38s %s\n' solange off "" ;;
+    esac
   fi
 } > .stack/where.txt
 
@@ -210,6 +243,7 @@ if local_ "$KULOFFICE" && ! local_ "$KEYCLOAK"; then
   note "you sign in with your server account; this kuloffice has its own database, so you onboard again here"
   [ "$SEED" = yes ] || note "no reviewer here: set SERVER_KC_ADMIN_PASSWORD and SERVER_REVIEWER_EMAIL to make your staff account one"
 fi
-if local_ "$KULOFFICE" && [ -n "$SOLANGE_BASE" ]; then note "QR codes through the server's Solange: its scan webhooks can't reach this laptop"; fi
-if ! local_ "$WEB" && { local_ "$KULOFFICE" || local_ "$KEYCLOAK"; }; then note "the deployed web app never calls this laptop: use the token panel or the API here"; fi
+if [ "$QR" = server ]; then note "QR codes through the server's Solange: its scan webhooks can't reach this laptop"; fi
+if ! local_ "$WEB" && { local_ "$KULOFFICE" || local_ "$KEYCLOAK"; }; then note "the deployed web app never calls this laptop: call the API here (PANEL=on adds the token panel)"; fi
+if local_ "$KULOFFICE" && ! local_ "$KEYCLOAK"; then note "no SMS inbox: this kuloffice's own SMS (approvals) are only logged"; fi
 if ! local_ "$KEYCLOAK" && local_ "$WEB"; then note "the server's Keycloak must accept http://localhost:$WEB_PORT (DEV_WEB_ORIGINS on the server, applied by Server → provision)"; fi

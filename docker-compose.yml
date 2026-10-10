@@ -67,6 +67,9 @@ services:
       - "${STACK_BIND:-127.0.0.1}:${KULOFFICE_PORT:-18080}:${KULOFFICE_PORT:-18080}"
       - "${STACK_BIND:-127.0.0.1}:${KULOFFICE_GRPC_PORT:-50051}:${KULOFFICE_GRPC_PORT:-50051}"
       - "${STACK_BIND:-127.0.0.1}:${WEB_PORT:-3000}:${WEB_PORT:-3000}"
+      - "${STACK_BIND:-127.0.0.1}:${PORTAL_PORT:-3100}:${PORTAL_PORT:-3100}"
+      - "${STACK_BIND:-127.0.0.1}:${SOLANGE_PORT:-8094}:${SOLANGE_PORT:-8094}"
+      - "${STACK_BIND:-127.0.0.1}:${SOLANGE_CONSOLE_PORT:-8095}:${SOLANGE_CONSOLE_PORT:-8095}"
       # The panel holds live tokens: loopback only, whatever STACK_BIND says.
       - "127.0.0.1:${PANEL_PORT:-8765}:${PANEL_PORT:-8765}"
 
@@ -150,9 +153,19 @@ services:
       keycloak: { condition: service_healthy }
     volumes:
       - ${INTAKA_DIR:-../keycloak-phone-authenticator}/demo/setup:/setup:ro
+      - ./stack:/stack:ro
+      - ./deploy/tools:/deploy-tools:ro
     environment:
       KEYCLOAK_URL: http://localhost:${KC_PORT:-8080}/auth
       REALM: demo
+      # Solange's console client and roles (the server's deploy/tools scripts).
+      SOLANGE_CONSOLE_PUBLIC_URL: http://localhost:${SOLANGE_CONSOLE_PORT:-8095}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: admin
+      # The review portal's client (stack/add_portal_client.py).
+      PORTAL_URL: http://localhost:${PORTAL_PORT:-3100}
+      PORTAL_CLIENT_SECRET: ${PORTAL_CLIENT_SECRET:-kulportal-local-secret}
+      # The instruction worker's client (stack/add_worker_client.py).
+      WORKER_CLIENT_SECRET: ${WORKER_CLIENT_SECRET:-kuloffice-worker-local-secret}
       APP_CLIENT_ID: demo-app
       ADMIN_CLIENT_ID: demo-backend
       ADMIN_CLIENT_SECRET: demo-backend-secret
@@ -179,13 +192,17 @@ services:
         if [ -f /setup/add_ussd_client.py ]; then python3 /setup/add_ussd_client.py; fi
         if [ -f /setup/update_existing_realm.py ]; then python3 /setup/update_existing_realm.py; fi
         if [ -f /setup/add_workforce_realm.py ]; then python3 /setup/add_workforce_realm.py; else echo "no workforce realm script in this intaka checkout: reviewer sign-in skipped"; fi
+        python3 /stack/add_portal_client.py
+        python3 /stack/add_worker_client.py
+        python3 /deploy-tools/solange_console_client.py
+        STAFF_EMAIL="$$REVIEWER_EMAIL" SOLANGE_ROLES=admin python3 /deploy-tools/staff_user.py
 
   # The demo backend from intaka. It is the dev SMS inbox - Keycloak sends codes
   # to it and kuloffice sends its SMS to it, so nothing reaches a real phone;
   # read it at http://localhost:${SMS_INBOX_PORT}/api/dev/inbox - and the demo
   # page and API the intaka demo app and its Flutter client talk to.
   sms-inbox:
-    profiles: ["base"]
+    profiles: ["inbox"]
     build:
       context: ${INTAKA_DIR:-../keycloak-phone-authenticator}/demo
       dockerfile: backend/Dockerfile
@@ -246,7 +263,7 @@ services:
       - -ec
       - |
         mc alias set local http://minio:9000 "$$MINIO_ROOT_USER" "$$MINIO_ROOT_PASSWORD" >/dev/null
-        mc mb --ignore-existing "local/$$KYC_BUCKET" "local/$$PENDING_BUCKET"
+        mc mb --ignore-existing "local/$$KYC_BUCKET" "local/$$PENDING_BUCKET" local/logos
         if mc ilm rule ls "local/$$PENDING_BUCKET" >/dev/null 2>&1; then
           echo "lifecycle rule on $$PENDING_BUCKET already set"
         else
@@ -303,7 +320,7 @@ services:
       net: { condition: service_started }
       db: { condition: service_healthy }
       fileserver: { condition: service_started }
-      sms-inbox: { condition: service_started }
+      sms-inbox: { condition: service_started, required: false }
     environment:
       KULOFFICE_ENVIRONMENT: development
       KULOFFICE_SERVER_HTTP_PORT: ${KULOFFICE_PORT:-18080}
@@ -337,12 +354,115 @@ services:
       KULOFFICE_OPERATOR_REVIEW_SYNC: "true"
       # false: no MiniAiLive calls at all; a reviewer transcribes instead.
       KULOFFICE_BIOMETRICS_ENABLED: ${BIOMETRICS_ENABLED:-true}
-      # QR codes through the server's Solange, with SOLANGE_API_KEY (off
-      # without it). Its scan webhooks can't reach this laptop.
+      # QR codes: the local Solange (stack/solange-setup.sh issues the key and
+      # the webhook), or the server's with SOLANGE_API_KEY. Off when neither.
       KULOFFICE_SOLANGE_BASE_URL: ${SOLANGE_BASE:-}
       KULOFFICE_SOLANGE_API_KEY: ${SOLANGE_KEY:-}
+      KULOFFICE_SOLANGE_WEBHOOK_SECRETS: ${SOLANGE_WEBHOOK_SECRETS:-}
       KULOFFICE_SOLANGE_WEB_URL: ${WEB_URL:-http://localhost:3000}
       KULOFFICE_SOLANGE_PUBLIC_API_URL: http://localhost:${KULOFFICE_PORT:-18080}
+      # Instruction worker policies (JSON list), empty: no remote worker may
+      # register. See kuloffice/docs/instruction-workers.md.
+      KULOFFICE_INSTRUCTION_WORKERS: ${INSTRUCTION_WORKERS:-}
+
+  # ---- Instruction worker (opt-in) --------------------------------------------
+  # Executes accepted transfers, balance queries and fee charges against BLNK.
+  # Off unless asked for: `docker compose --profile kuloffice-worker up -d
+  # kuloffice-worker`. BLNK has no default here, so pointing it at the hosted
+  # BLNK (real ledger mutations) is always a deliberate choice. Needs the
+  # worker client in Keycloak and INSTRUCTION_WORKERS on kuloffice; see
+  # kuloffice/docs/instruction-workers.md.
+  kuloffice-worker:
+    profiles: ["kuloffice-worker"]
+    image: ${KULOFFICE_REF:-kulstack-kuloffice:local}
+    network_mode: service:net
+    restart: unless-stopped
+    entrypoint: ["kuloffice-worker"]
+    command: []
+    depends_on:
+      kuloffice: { condition: service_started }
+    environment:
+      KULOFFICE_WORKER_ADDR: localhost:${KULOFFICE_GRPC_PORT:-50051}
+      KULOFFICE_WORKER_INSECURE: "true" # same network namespace, never over a network
+      KULOFFICE_WORKER_TOKEN_URL: ${KC_PUBLIC:-http://localhost:8080/auth}/realms/${KC_REALM:-demo}/protocol/openid-connect/token
+      KULOFFICE_WORKER_CLIENT_ID: ${WORKER_CLIENT_ID:-kuloffice-worker}
+      KULOFFICE_WORKER_CLIENT_SECRET: ${WORKER_CLIENT_SECRET:-kuloffice-worker-local-secret}
+      KULOFFICE_WORKER_CAPABILITIES: ${WORKER_CAPABILITIES:-}
+      KULOFFICE_WORKER_PROVIDERS: ${WORKER_PROVIDERS:-blnk}
+      KULOFFICE_WORKER_CAPACITY: ${WORKER_CAPACITY:-2}
+      KULOFFICE_ADAPTER_BLNK_BASE_URL: ${WORKER_BLNK_BASE_URL:-}
+      KULOFFICE_ADAPTER_BLNK_BALANCE_PRODUCT_FEES: ${WORKER_BLNK_FEE_BALANCE:-}
+
+  # ---- Solange (QR codes), the same image as the server's ---------------------
+  # Its database beside kuloffice's, made once (the init script only runs on a
+  # new volume).
+  solange-db:
+    profiles: ["qr"]
+    image: postgres:17
+    depends_on:
+      db: { condition: service_healthy }
+    environment:
+      PGPASSWORD: kuloffice
+    entrypoint:
+      - sh
+      - -ec
+      - |
+        q() { psql -h db -U kuloffice -d postgres -tAc "$$1"; }
+        [ "$$(q "SELECT 1 FROM pg_roles WHERE rolname='solange'")" = 1 ] || q "CREATE USER solange WITH PASSWORD 'solange'"
+        [ "$$(q "SELECT 1 FROM pg_database WHERE datname='solange'")" = 1 ] || q "CREATE DATABASE solange OWNER solange"
+        echo "solange database ready"
+
+  solange-migrate:
+    profiles: ["qr"]
+    image: ${SOLANGE_IMAGE:-developerspavs/kulpay-solange}:${SOLANGE_TAG:-2026.10.03-1}
+    platform: linux/amd64 # the only image built; runs emulated on Apple silicon
+    depends_on:
+      solange-db: { condition: service_completed_successfully }
+    command: ["migrate"]
+    environment:
+      SOLANGE_DATABASE_URL: postgres://solange:solange@db:5432/solange?sslmode=disable
+
+  # http://localhost:${SOLANGE_PORT}: the API kuloffice calls, and the scan
+  # edge printed codes point at. Test mode: its webhooks may be plain http.
+  solange:
+    profiles: ["qr"]
+    image: ${SOLANGE_IMAGE:-developerspavs/kulpay-solange}:${SOLANGE_TAG:-2026.10.03-1}
+    platform: linux/amd64 # the only image built; runs emulated on Apple silicon
+    network_mode: service:net
+    restart: unless-stopped
+    depends_on:
+      solange-migrate: { condition: service_completed_successfully }
+    command: ["serve"]
+    environment:
+      SOLANGE_DATABASE_URL: postgres://solange:solange@db:5432/solange?sslmode=disable
+      SOLANGE_LISTEN: ":${SOLANGE_PORT:-8094}"
+      SOLANGE_PUBLIC_URL: http://localhost:${SOLANGE_PORT:-8094}
+      SOLANGE_VISITOR_SECRET: kuloffice-demo-local-visitor-secret
+      # Seals webhook secrets: local only, never the server's.
+      SOLANGE_ENCRYPTION_KEY: a3Vsb2ZmaWNlLWRlbW8tbG9jYWwtc29sYW5nZS1rZXk=
+      SOLANGE_TRUSTED_PROXIES: 127.0.0.1
+      # The staff API, for the console: the local workforce realm.
+      SOLANGE_KEYCLOAK_ISSUER: http://localhost:${KC_PORT:-8080}/auth/realms/workforce
+      SOLANGE_KEYCLOAK_CLIENT: solange-console
+
+  # Solange's console: codes, templates, logos, keys, webhooks.
+  # http://localhost:${SOLANGE_CONSOLE_PORT}, as the demo reviewer (admin there).
+  solange-console:
+    profiles: ["qr"]
+    image: ${SOLANGE_CONSOLE_IMAGE:-developerspavs/kulpay-solange-console}:${SOLANGE_CONSOLE_TAG:-2026.10.02-1}
+    platform: linux/amd64
+    network_mode: service:net
+    restart: unless-stopped
+    depends_on:
+      solange: { condition: service_started }
+    command: ["node_modules/.bin/next", "start", "--port", "${SOLANGE_CONSOLE_PORT:-8095}"]
+    environment:
+      SOLANGE_CONSOLE_URL: http://localhost:${SOLANGE_CONSOLE_PORT:-8095}
+      SOLANGE_KEYCLOAK_ISSUER: http://localhost:${KC_PORT:-8080}/auth/realms/workforce
+      SOLANGE_KEYCLOAK_CLIENT_ID: solange-console
+      SOLANGE_API_URL: http://localhost:${SOLANGE_PORT:-8094}
+      SOLANGE_PUBLIC_URL: http://localhost:${SOLANGE_PORT:-8094}
+      SOLANGE_SESSION_SECRET: kuloffice-demo-local-solange-console-session-0123456789
 
   # Activates the license and registers Keycloak as kuloffice's identity
   # provider, skipping whichever is already done. Re-run with `make bootstrap`.
@@ -442,12 +562,36 @@ services:
       KULPAY_API_URL: ${API_URL:-http://localhost:18080}
       KULPAY_SESSION_SECRET: ${KULPAY_SESSION_SECRET:-}
 
+  # The review portal (kulportal2): reviewers sign in to the workforce realm
+  # and work kuloffice's review queue. http://localhost:${PORTAL_PORT}.
+  portal:
+    build:
+      context: ${PORTAL_DIR:-../kulportal2}
+    image: ${PORTAL_REF:-kulstack-portal:local}
+    profiles: ["portal"]
+    network_mode: service:net
+    restart: unless-stopped
+    depends_on:
+      kuloffice: { condition: service_started, required: false }
+      realm-setup: { condition: service_completed_successfully, required: false }
+    environment:
+      PORT: ${PORTAL_PORT:-3100}
+      HOSTNAME: 0.0.0.0
+      KULOFFICE_URL: http://localhost:${KULOFFICE_PORT:-18080}
+      OIDC_ISSUER: http://localhost:${KC_PORT:-8080}/auth/realms/workforce
+      OIDC_CLIENT_ID: kulportal
+      OIDC_CLIENT_SECRET: ${PORTAL_CLIENT_SECRET:-kulportal-local-secret}
+      PORTAL_URL: http://localhost:${PORTAL_PORT:-3100}
+      SESSION_SECRET: ${PORTAL_SESSION_SECRET:-local-portal-session-secret-change-me-0123456789}
+
   # Signs numbers in and keeps their tokens fresh: http://localhost:${PANEL_PORT}.
   token-panel:
+    profiles: ["panel"]
     image: python:3.12-alpine
     network_mode: service:net
     restart: unless-stopped
-    # Always here: it signs in to whichever Keycloak you name in it.
+    # With a local Keycloak, or PANEL=on: it signs in to whichever Keycloak you
+    # name in it.
     depends_on:
       realm-setup: { condition: service_completed_successfully, required: false }
     command: ["python3", "/stack/token-panel.py"]

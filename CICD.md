@@ -33,7 +33,7 @@ A unit is one repository's output. All its images carry the repository's tag.
 | solange | `phase0-make-safe` | `solange` | solange, solange-console | Solange's database, **plus kuloffice's QR records** |
 | kulpay-webapp | `main` | `web` | web | none |
 | boquisso-fileserver | `main` | `fileserver` | fileserver | none |
-| kulportal | — | `kulportal` | kulportal | none (no workflow yet; deploy by hand) |
+| kulportal2 | `main` | `kulportal` | kulportal | none |
 
 A tag only triggers a release if the tagged commit contains
 `.github/workflows/release.yml`. That is why the branch matters: tag the
