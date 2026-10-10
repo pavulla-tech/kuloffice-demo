@@ -125,7 +125,7 @@ services:
       # Postgres rather than start-dev's in-memory store: the realm and its
       # users survive a recreate, and stay in step with kuloffice's accounts.
       KC_DB: postgres
-      KC_DB_URL: jdbc:postgresql://db:5432/keycloak
+      KC_DB_URL: jdbc:postgresql://db:5433/keycloak
       KC_DB_USERNAME: keycloak
       KC_DB_PASSWORD: keycloak
     # The kulpay login theme comes from the extension JAR. Do not mount
@@ -209,7 +209,8 @@ services:
 
   minio:
     profiles: ["kuloffice"]
-    image: minio/minio:RELEASE.2024-08-17T01-24-54Z
+    # image: minio/minio:RELEASE.2024-08-17T01-24-54Z
+    image: developerspavs/kulpay-minio:2026.10.02-1
     restart: unless-stopped
     command: ["server", "/data", "--console-address", ":9001"]
     environment:
@@ -230,7 +231,8 @@ services:
   # submission is accepted, and its lifecycle rule removes what never is.
   minio-init:
     profiles: ["kuloffice"]
-    image: minio/mc:RELEASE.2024-08-17T11-33-50Z
+    # image: minio/mc:RELEASE.2024-08-17T11-33-50Z
+    image: developerspavs/kulpay-mc:2026.10.02-1
     depends_on:
       minio: { condition: service_healthy }
     environment:
@@ -318,6 +320,9 @@ services:
       KULOFFICE_KEYCLOAK_CLIENT_ID: ${KC_BACKEND_CLIENT:-demo-backend}
       KULOFFICE_KEYCLOAK_CLIENT_SECRET: ${KC_BACKEND_SECRET:-demo-backend-secret}
       KULOFFICE_KEYCLOAK_ONBOARDING_ROLE: onboarding_pending
+      # The staff realm: its tokens never become customers, and an operator
+      # is bound at first sign-in when their verified email is theirs.
+      KULOFFICE_AUTH_WORKFORCE_ISSUERS: ${KC_WORKFORCE_ISSUER:-http://localhost:8080/auth/realms/workforce}
       # The dev inbox, never the real gateway (whose credentials are the
       # config defaults).
       KULOFFICE_SMS_BASE_URL: http://sms-inbox:8080/api/dev/sms
