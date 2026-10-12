@@ -206,7 +206,11 @@ services:
             mode: live
             account_id: "$$GATEWAY_ACCOUNT_ID"
             label: "kuloffice platform integration"
-            scopes: [service:payments:read, service:settlements:read, service:fees:write, service:webhooks:write]
+            # Operator-issued service scopes only, never accounts:write: payment
+            # and payable read-back, fee instructions, merchant webhooks, and
+            # merchant provisioning by account_id (IG-76/IG-67: tenant,
+            # application, application-bound keys, connector sessions).
+            scopes: [service:payments:read, service:settlements:read, service:fees:write, service:webhooks:write, service:accounts:write, service:applications:write, service:keys:write, service:connector-sessions:write]
             rate_per_minute: 600
           - id: operator
             secret: "$$GATEWAY_ADMIN_KEY"

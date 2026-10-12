@@ -314,7 +314,12 @@ The integration uses three independent Gateway keys. `GATEWAY_API_KEY` belongs
 to KulOffice's own Gateway account and can create/read payments, incoming
 transfers, bill payments and its own webhook. `GATEWAY_SERVICE_API_KEY` is the
 operator-issued cross-account service key used only for authenticated payment
-and payable read-back, fee instructions and merchant webhook provisioning.
+and payable read-back, fee instructions, merchant webhook provisioning and
+merchant provisioning (IG-67: the merchant's tenant, Payment Acceptance
+applications, application-bound keys and connector sessions, through the
+narrow `service:accounts:write`, `service:applications:write`,
+`service:keys:write` and `service:connector-sessions:write` scopes). It never
+holds `accounts:write`.
 `GATEWAY_ADMIN_KEY` configures connector bindings and the one platform event
 sink. Do not combine them: their separation is part of the tenant boundary.
 
