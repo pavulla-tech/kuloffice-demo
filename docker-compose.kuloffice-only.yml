@@ -58,6 +58,10 @@ services:
       #Admin
       - KULOFFICE_ADMIN_EMAIL=${KULOFFICE_ADMIN_EMAIL}
       - KULOFFICE_ADMIN_PASSWORD=${KULOFFICE_ADMIN_PASSWORD}
+      # HTTP Basic for the env admin (IG-84); off after bootstrap if wanted.
+      - KULOFFICE_ADMIN_BASIC_ENABLED=${KULOFFICE_ADMIN_BASIC_ENABLED:-true}
+      # Issuer of service tokens (Gateway client, workers) (IG-84).
+      - KULOFFICE_AUTH_SERVICE_ISSUER=${KULOFFICE_AUTH_SERVICE_ISSUER:-}
 
       # License
       - KULOFFICE_LICENSE_KEY=${KULOFFICE_LICENSE_KEY}

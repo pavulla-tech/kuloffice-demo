@@ -319,7 +319,25 @@ merchant provisioning (IG-67: the merchant's tenant, Payment Acceptance
 applications, application-bound keys and connector sessions, through the
 narrow `service:accounts:write`, `service:applications:write`,
 `service:keys:write` and `service:connector-sessions:write` scopes). It never
-holds `accounts:write`.
+holds `accounts:write`. Turn provisioning on with
+`KULOFFICE_PAYMENT_ACCEPTANCE_PROVISIONING_ENABLED=true` once the Gateway serves
+those scopes; `bin/kulpay` generates its seal key
+(`KULOFFICE_PAYMENT_ACCEPTANCE_SECRET_SEAL_KEY`) into `.env` when empty.
+
+Since IG-84 KulOffice needs, besides the above: `KULOFFICE_ADMIN_BASIC_ENABLED`
+(true by default here, for provisioning's bootstrap; set it to `false` in `.env`
+and `make restart S=kuloffice` once provisioning ran), an admin password of at
+least 20 characters (`bin/kulpay` generates one when `KULOFFICE_ADMIN_PASSWORD`
+is empty), `KULOFFICE_AUTH_SERVICE_ISSUER` (default: the `REALM` realm under
+`KEYCLOAK_PUBLIC_URL`; production refuses to start without it while the
+Gateway client or a worker is configured), and the `OLA_SMS_*` values: KulOffice
+has no SMS defaults any more, so SMS is off without them.
+
+Since Gateway IG-83, the gateway believes `X-Forwarded-For` only from
+`KULPAY_TRUSTED_PROXIES` (default: loopback and `STACK_GATEWAY`), and
+maker-checker compares principals: the `operator` key carries
+`principal: operator:kit-operator`, so it can prepare or approve a request but
+never both; the other side needs a different principal.
 `GATEWAY_ADMIN_KEY` configures connector bindings and the one platform event
 sink. Do not combine them: their separation is part of the tenant boundary.
 

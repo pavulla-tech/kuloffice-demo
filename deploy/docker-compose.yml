@@ -217,6 +217,10 @@ services:
             mode: live
             account_id: "$$GATEWAY_ACCOUNT_ID"
             label: "connector bindings"
+            # Maker-checker compares principals (IG-83): this key may prepare
+            # or approve, never both on one request; the other side needs a
+            # different principal.
+            principal: "operator:kit-operator"
             scopes: [admin:read, admin:write, connectors:read, connectors:write]
             rate_per_minute: 60
         EOF
@@ -244,6 +248,10 @@ services:
       KULPAY_ACCOUNT_ID: ${GATEWAY_ACCOUNT_ID:?set GATEWAY_ACCOUNT_ID}
       KULPAY_LOG_FORMAT: json
       KULPAY_OIDC_ENABLED: "false"
+      # IG-83: X-Forwarded-For counts only from these peers. Nothing proxies
+      # the gateway here but the host, through this network's gateway address;
+      # other containers on the network are not trusted.
+      KULPAY_TRUSTED_PROXIES: ${KULPAY_TRUSTED_PROXIES:-127.0.0.0/8,::1/128,${STACK_GATEWAY:-10.250.0.1}}
       # Every rail is a database binding (gateway-bind). Operator-confirmed
       # "manual" payments would be money that never crossed a rail: off.
       KULPAY_CONNECTORS_MANUAL_ENABLED: "false"
@@ -440,6 +448,15 @@ services:
       KULOFFICE_DATABASE_URL: postgres://kuloffice:${KULOFFICE_DB_PASSWORD}@db:5432/kuloffice?sslmode=disable
       KULOFFICE_ADMIN_EMAIL: ${KULOFFICE_ADMIN_EMAIL:?set KULOFFICE_ADMIN_EMAIL}
       KULOFFICE_ADMIN_PASSWORD: ${KULOFFICE_ADMIN_PASSWORD:?set KULOFFICE_ADMIN_PASSWORD}
+      # HTTP Basic for the env admin (IG-84): bootstrap and the reviewer seed
+      # need it. Set KULOFFICE_ADMIN_BASIC_ENABLED=false in .env once they ran.
+      # Outside development the password must be at least 20 characters
+      # (bin/kulpay generates one into .env when it is empty).
+      KULOFFICE_ADMIN_BASIC_ENABLED: ${KULOFFICE_ADMIN_BASIC_ENABLED:-true}
+      # The issuer the Gateway's client and instruction workers' tokens must
+      # come from (IG-84): the kulpay realm. Production does not start without
+      # it while a Gateway client or worker is configured.
+      KULOFFICE_AUTH_SERVICE_ISSUER: ${KULOFFICE_AUTH_SERVICE_ISSUER:-${KEYCLOAK_PUBLIC_URL}/realms/${REALM:-kulpay}}
       # The admin API, for the PIN at the end of onboarding. Tokens are checked
       # against the public issuer, which kuloffice fetches through Apache.
       KULOFFICE_KEYCLOAK_BASE_URL: http://keycloak:8080
@@ -450,6 +467,7 @@ services:
       # Staff tokens from this realm never become customers; an operator added
       # in the portal is bound at first sign-in by their verified email.
       KULOFFICE_AUTH_WORKFORCE_ISSUERS: ${KEYCLOAK_PUBLIC_URL}/realms/${WORKFORCE_REALM:-workforce}
+      # No defaults in KulOffice any more (IG-84): from .env, or SMS is off.
       KULOFFICE_SMS_BASE_URL: ${OLA_SMS_BASE_URL}
       KULOFFICE_SMS_API_KEY: ${OLA_SMS_API_KEY}
       KULOFFICE_SMS_PROVIDER_ID: ${OLA_SMS_PROVIDER_ID}
@@ -504,6 +522,11 @@ services:
       KULOFFICE_PAYMENT_ACCEPTANCE_WEBHOOK_SECRETS: ${KULOFFICE_PAYMENT_ACCEPTANCE_WEBHOOK_SECRETS:-}
       KULOFFICE_PAYMENT_ACCEPTANCE_GATEWAY_TIMEOUT: 30s
       KULOFFICE_PAYMENT_ACCEPTANCE_PROCESS_INTERVAL: 5s
+      # Gateway provisioning of Payment Acceptance applications (IG-67): the
+      # service key above holds its four scopes. The seal key (bin/kulpay
+      # generates it into .env) seals keys' one-time reveals.
+      KULOFFICE_PAYMENT_ACCEPTANCE_PROVISIONING_ENABLED: ${KULOFFICE_PAYMENT_ACCEPTANCE_PROVISIONING_ENABLED:-false}
+      KULOFFICE_PAYMENT_ACCEPTANCE_SECRET_SEAL_KEY: ${KULOFFICE_PAYMENT_ACCEPTANCE_SECRET_SEAL_KEY:-}
       KULOFFICE_RECONCILIATION_ENABLED: ${KULOFFICE_RECONCILIATION_ENABLED:-false}
       KULOFFICE_RECONCILIATION_INTERVAL: 1h
       KULOFFICE_RECONCILIATION_WINDOW: 48h

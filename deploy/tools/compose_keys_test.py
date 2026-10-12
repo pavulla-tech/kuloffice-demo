@@ -42,6 +42,10 @@ class ServiceKeyScopesTest(unittest.TestCase):
             self.assertNotIn(forbidden, scopes)
         self.assertTrue(all(s.startswith("service:") for s in scopes), scopes)
 
+    def test_operator_key_names_its_principal_for_maker_checker(self):
+        block = re.search(r"- id: operator\n(.*?)(?=\n\s*EOF)", COMPOSE.read_text(), re.S).group(1)
+        self.assertRegex(block, r'principal: "operator:[a-z0-9-]+"')
+
     def test_account_key_has_no_service_scope(self):
         self.assertFalse(any(s.startswith("service:") for s in key_scopes("kuloffice")))
 

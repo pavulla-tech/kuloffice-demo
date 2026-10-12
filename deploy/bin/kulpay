@@ -452,6 +452,21 @@ portal_setup() {
     'KC_BOOTSTRAP_ADMIN_USERNAME="${KC_ADMIN_USER:-admin}" KC_BOOTSTRAP_ADMIN_PASSWORD="$KC_ADMIN_PASSWORD" PORTAL_URL="$KULPORTAL_PUBLIC_URL" PORTAL_CLIENT_SECRET="$KULPORTAL_CLIENT_SECRET" python3 /stack/add_portal_client.py'
 }
 
+# KulOffice's generated secrets, made once into .env (not shown): the
+# env-admin password (at least 20 characters outside development, IG-84) and
+# the provisioning seal key (base64 of 32 bytes, IG-67).
+kuloffice_secrets() {
+  local pw
+  [[ -n $(env_get KULOFFICE_ADMIN_PASSWORD || true) ]] ||
+    env_set KULOFFICE_ADMIN_PASSWORD "$(head -c 24 /dev/urandom | od -An -tx1 | tr -d ' \n')"
+  pw=$(env_get KULOFFICE_ADMIN_PASSWORD || true)
+  if (( ${#pw} < 20 )) && [[ $(env_get KULOFFICE_ENVIRONMENT || true) != development ]]; then
+    say "warning: KULOFFICE_ADMIN_PASSWORD is shorter than 20 characters; kuloffice will refuse it"
+  fi
+  [[ -n $(env_get KULOFFICE_PAYMENT_ACCEPTANCE_SECRET_SEAL_KEY || true) ]] ||
+    env_set KULOFFICE_PAYMENT_ACCEPTANCE_SECRET_SEAL_KEY "$(head -c 32 /dev/urandom | base64 | tr -d '\n')"
+}
+
 cmd_deploy() {
   local unit=${1:-} tag=${2:-} cur mode=update db backups="" prev_files
   valid_unit "$unit"; valid_tag "$tag"
@@ -464,6 +479,7 @@ cmd_deploy() {
   fi
   say "deploy $unit: ${cur:-nothing} → $tag ($mode)"
   [[ $unit == kulportal ]] && portal_setup
+  [[ $unit == kuloffice ]] && kuloffice_secrets
   pull_unit "$unit" "$tag"
 
   if [[ $mode == update ]]; then
@@ -642,6 +658,7 @@ cmd_health() {
 # each step only if missing). What a person must still do is listed after.
 cmd_provision() {
   lock
+  kuloffice_secrets
   say "init: realms, clients, license, identity providers"
   compose --profile tools run --rm tools /tools/init.sh
   say "Gateway: incoming-transfer endpoint and platform payment-event sink"

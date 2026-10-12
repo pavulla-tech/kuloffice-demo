@@ -333,6 +333,11 @@ services:
       KULOFFICE_DATABASE_URL: postgres://kuloffice:kuloffice@db:5432/kuloffice?sslmode=disable
       KULOFFICE_ADMIN_EMAIL: ${KULOFFICE_ADMIN_EMAIL:-admin@kulpay.local}
       KULOFFICE_ADMIN_PASSWORD: ${KULOFFICE_ADMIN_PASSWORD:-localadmin}
+      # bootstrap and the reviewer seed sign in with HTTP Basic (IG-84; on by
+      # default in development, explicit here).
+      KULOFFICE_ADMIN_BASIC_ENABLED: ${KULOFFICE_ADMIN_BASIC_ENABLED:-true}
+      # The realm service tokens (Gateway client, workers) come from (IG-84).
+      KULOFFICE_AUTH_SERVICE_ISSUER: ${KULOFFICE_AUTH_SERVICE_ISSUER:-http://localhost:8080/auth/realms/demo}
       # Sets the PIN at the end of onboarding (POST /onboarding/pin).
       # The local demo realm, or the server's (KEYCLOAK=server).
       KULOFFICE_KEYCLOAK_BASE_URL: ${KC_PUBLIC:-http://localhost:8080/auth}
