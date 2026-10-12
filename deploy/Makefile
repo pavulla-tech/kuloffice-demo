@@ -6,7 +6,7 @@
 .PHONY: help setup sync-env clean-env-backups config check-images \
         images push bundle load theme license \
         start start-portal stop restart logs ps update clean reset-blnk \
-        init operator solange-kulpay \
+        init operator solange-kulpay gateway-kuloffice \
         deploy rollback releases status health backup restore
 
 ENV_FILE ?= .env
@@ -54,6 +54,7 @@ help:
 	@echo ""
 	@echo "Provisioning (on the server, after start)"
 	@echo "  make init               realms, clients, kuloffice license and identity providers"
+	@echo "  make gateway-kuloffice  Gateway event endpoints and signing secrets for KulOffice"
 	@echo "  make operator EMAIL=… FIRST=… LAST=… [ROLE=Revisores|ADMIN] [SOLANGE=viewer,developer]"
 	@echo "                          ROLE=ADMIN: the Administradores role (every kuloffice permission)"
 	@echo "                          a staff account; ROLE= (empty) for Solange only"
@@ -206,6 +207,12 @@ reset-blnk:
 
 init:
 	$(COMPOSE) --profile tools run --rm tools /tools/init.sh
+
+# The account webhook (incoming transfers) and the platform event sink
+# (payment acceptance) share KulOffice's signed-event intake but have separate
+# secrets. Safe to repeat; secrets are rotated only when .env lost its copy.
+gateway-kuloffice:
+	@ENV_FILE=$(ENV_FILE) COMPOSE="docker compose --env-file $(ENV_FILE)" sh scripts/gateway-kuloffice.sh
 
 # ROLE=ADMIN: an admin, holding every permission in kuloffice's catalogue.
 ROLE ?= Revisores
