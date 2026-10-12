@@ -1,13 +1,14 @@
 #!/bin/sh
-# A merchant's kulpay_balance binding on the Gateway, made from its Payment
-# Acceptance application in KulOffice (make kulpay-balance APP=pacapp_…).
+# A merchant's bindings on the Gateway, made from its Payment Acceptance
+# application in KulOffice (make merchant-bindings APP=pacapp_…): KulPay
+# balance, and for a live application M-Pesa at the PSP simulator.
 # KulOffice's database gives the application's account, environment, receiving
 # product (live) or sandbox destination (test) and the business's Gateway
 # tenant (set by IG-67 provisioning); the tools image then writes the binding
 # with the operator key. Secrets stay in .env and are never printed.
 set -eu
 
-app=${1:?usage: kulpay-balance.sh pacapp_…}
+app=${1:?usage: merchant-bindings.sh pacapp_…}
 env_file=${ENV_FILE:-.env}
 COMPOSE=${COMPOSE:-docker compose --env-file "$env_file"}
 
@@ -33,4 +34,4 @@ if [ "$environment" = test ]; then destination=$sandbox; else destination=$produ
 $COMPOSE --profile tools run --rm --entrypoint python3 \
   -e BINDING_APP="$app" -e BINDING_ACCOUNT="$account" -e BINDING_MODE="$environment" \
   -e BINDING_PRODUCT="$destination" -e BINDING_TENANT="$tenant" \
-  tools /tools/kulpay_balance_binding.py
+  tools /tools/merchant_bindings.py

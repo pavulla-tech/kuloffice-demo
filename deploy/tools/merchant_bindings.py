@@ -1,8 +1,10 @@
-"""Write a merchant's kulpay_balance binding on the Gateway (scripts/kulpay-balance.sh).
+"""Write a merchant's bindings on the Gateway (scripts/merchant-bindings.sh).
 
-The binding calls KulOffice as the Gateway's service client and verifies
+KulPay balance calls KulOffice as the Gateway's service client and verifies
 KulOffice's signed checkout wake-ups with the mode's signing secret (IG-45).
-Nothing secret is printed: only the binding's id, mode and callback path.
+A live application also gets M-Pesa at the PSP simulator, configured as the
+simulator's own `bind` does for KulOffice's account (dev servers only).
+Nothing secret is printed: only each binding's id, mode and callback path.
 """
 
 import json
@@ -50,6 +52,23 @@ def main():
             "application_id": need("BINDING_APP"),
         },
     }
+    save(body)
+    if mode == "live":
+        sim = os.environ.get("SIMULATOR_URL", "http://simulator:8085").rstrip("/")
+        try:
+            with urllib.request.urlopen(sim + "/mpesa/public-key", timeout=15) as response:
+                public_key = response.read().decode().strip()
+        except (urllib.error.URLError, OSError) as error:
+            sys.exit(f"the PSP simulator did not answer ({error}); M-Pesa not bound")
+        save({
+            "account_id": body["account_id"], "mode": "live", "method": "mpesa", "driver": "mpesa",
+            "label": "mpesa (PSP simulator)", "enabled": True,
+            "config": {"api_key": "simulator", "public_key": public_key, "service_provider_code": "171717",
+                       "base_url": sim + "/mpesa", "timeout": "90s"},
+        })
+
+
+def save(body):
     req = urllib.request.Request(BASE + "/admin/connectors", data=json.dumps(body).encode(), method="POST")
     req.add_header("Authorization", "Bearer " + need("GATEWAY_ADMIN_KEY"))
     req.add_header("Content-Type", "application/json")
@@ -57,9 +76,9 @@ def main():
         with urllib.request.urlopen(req) as response:
             view = json.loads(response.read() or b"{}")
     except urllib.error.HTTPError as error:
-        sys.exit(f"the Gateway refused the binding: {error.code} {error.read().decode(errors='replace')}")
-    print(f"kulpay_balance binding {view.get('id', '?')} ({mode}) for {body['config']['application_id']}"
-          f" on tenant {body['account_id']}; callback {view.get('callback_url') or view.get('callback_path') or '-'}")
+        sys.exit(f"the Gateway refused the {body['method']} binding: {error.code} {error.read().decode(errors='replace')}")
+    print(f"{body['method']} binding {view.get('id', '?')} ({body['mode']}) on tenant {body['account_id']};"
+          f" callback {view.get('callback_url') or view.get('callback_path') or '-'}")
 
 
 if __name__ == "__main__":

@@ -216,12 +216,14 @@ init:
 secrets:
 	@$(KULPAY) secrets
 
-# A merchant's KulPay-balance binding on the Gateway, from its Payment
-# Acceptance application in KulOffice: APP=pacapp_… (test applications bind in
-# test mode, live ones in live mode). Safe to repeat: it updates the binding.
-kulpay-balance:
-	@[ -n "$(APP)" ] || { echo "usage: make kulpay-balance APP=pacapp_…" >&2; exit 1; }
-	@ENV_FILE=$(ENV_FILE) COMPOSE="docker compose --env-file $(ENV_FILE)" sh scripts/kulpay-balance.sh "$(APP)"
+# A merchant's bindings on the Gateway, from its Payment Acceptance
+# application in KulOffice: APP=pacapp_…. Always KulPay balance (test
+# applications in test mode, live ones in live mode); for a live application
+# also M-Pesa at the PSP simulator (dev servers only). Safe to repeat: it
+# updates the bindings.
+merchant-bindings:
+	@[ -n "$(APP)" ] || { echo "usage: make merchant-bindings APP=pacapp_…" >&2; exit 1; }
+	@ENV_FILE=$(ENV_FILE) COMPOSE="docker compose --env-file $(ENV_FILE)" sh scripts/merchant-bindings.sh "$(APP)"
 
 gateway-kuloffice:
 	@ENV_FILE=$(ENV_FILE) COMPOSE="docker compose --env-file $(ENV_FILE)" sh scripts/gateway-kuloffice.sh
