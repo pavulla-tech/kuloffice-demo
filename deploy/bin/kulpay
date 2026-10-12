@@ -473,6 +473,20 @@ kuloffice_secrets() {
   done
 }
 
+# The Gateway integration's generated values, made once into .env (not
+# shown) on every deploy, because compose needs them for every unit: KulOffice's
+# Gateway tenant (27 alphanumerics, fixed from then on), its platform service
+# key, and the Keycloak secret of the Gateway's client.
+gateway_secrets() {
+  [[ -n $(env_get GATEWAY_ACCOUNT_ID || true) ]] ||
+    env_set GATEWAY_ACCOUNT_ID "$(head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n' | cut -c1-27)"
+  local k
+  for k in GATEWAY_SERVICE_API_KEY GATEWAY_KULOFFICE_CLIENT_SECRET; do
+    [[ -n $(env_get "$k" || true) ]] ||
+      env_set "$k" "$(head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n')"
+  done
+}
+
 cmd_deploy() {
   local unit=${1:-} tag=${2:-} cur mode=update db backups="" prev_files
   valid_unit "$unit"; valid_tag "$tag"
@@ -485,7 +499,7 @@ cmd_deploy() {
   fi
   say "deploy $unit: ${cur:-nothing} → $tag ($mode)"
   [[ $unit == kulportal ]] && portal_setup
-  [[ $unit == kuloffice ]] && kuloffice_secrets
+  gateway_secrets; kuloffice_secrets
   pull_unit "$unit" "$tag"
 
   if [[ $mode == update ]]; then
@@ -664,7 +678,7 @@ cmd_health() {
 # each step only if missing). What a person must still do is listed after.
 cmd_provision() {
   lock
-  kuloffice_secrets
+  gateway_secrets; kuloffice_secrets
   say "init: realms, clients, license, identity providers"
   compose --profile tools run --rm tools /tools/init.sh
   say "Gateway: incoming-transfer endpoint and platform payment-event sink"
