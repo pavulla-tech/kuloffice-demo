@@ -488,7 +488,7 @@ services:
       KULOFFICE_ADAPTER_BLNK_BOOTSTRAP_ENABLED: "true"
       # For now, selected financial capabilities run in the API container.
       # The durable instruction lease still prevents a second executor.
-      KULOFFICE_EMBEDDED_FINANCIAL_WORKER: '{"enabled":true,"capabilities":["product_balance:query","product_transfer:create","fee:collect","transaction_fee:collect","bill_payment:create","checkout_balance:reserve","checkout_balance:capture","checkout_balance:void"],"max_capacity":2}'
+      KULOFFICE_EMBEDDED_FINANCIAL_WORKER: '{"enabled":true,"capabilities":["product_balance:query","product_transfer:create","fee:collect","transaction_fee:collect","bill_payment:create","checkout_balance:reserve","checkout_balance:capture","checkout_balance:void","checkout_balance:refund"],"max_capacity":2}'
       # Top-ups collect through the stack's own gateway. A wallet charge waits
       # for the customer (the simulator holds it up to 60s), so the client
       # timeout outlasts it; a timeout is an unknown outcome, re-sent with the
