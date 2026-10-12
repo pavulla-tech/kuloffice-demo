@@ -10,6 +10,7 @@
 #   kulpay backup   <database>                   a backup now
 #   kulpay restore  <database> <file> --yes      replace a database
 #   kulpay provision                             init, Gateway events, then QR codes (idempotent)
+#   kulpay secrets                               generate the missing generated values into .env
 #
 # Options anywhere: --actor NAME (who asked; CI passes the GitHub user).
 #
@@ -476,12 +477,13 @@ kuloffice_secrets() {
 # The Gateway integration's generated values, made once into .env (not
 # shown) on every deploy, because compose needs them for every unit: KulOffice's
 # Gateway tenant (27 alphanumerics, fixed from then on), its platform service
-# key, and the Keycloak secret of the Gateway's client.
+# key, the Keycloak secret of the Gateway's client and the second operator
+# (checker) key.
 gateway_secrets() {
   [[ -n $(env_get GATEWAY_ACCOUNT_ID || true) ]] ||
     env_set GATEWAY_ACCOUNT_ID "$(head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n' | cut -c1-27)"
   local k
-  for k in GATEWAY_SERVICE_API_KEY GATEWAY_KULOFFICE_CLIENT_SECRET; do
+  for k in GATEWAY_SERVICE_API_KEY GATEWAY_KULOFFICE_CLIENT_SECRET GATEWAY_CHECKER_KEY; do
     [[ -n $(env_get "$k" || true) ]] ||
       env_set "$k" "$(head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n')"
   done
@@ -726,5 +728,6 @@ case $command in
   backup) cmd_backup "$@" ;;
   restore) cmd_restore "$@" ;;
   provision) cmd_provision ;;
+  secrets) gateway_secrets; kuloffice_secrets; say "generated values present in $ENV_FILE (not shown)" ;;
   *) sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'; [[ $command == help ]] ;;
 esac
