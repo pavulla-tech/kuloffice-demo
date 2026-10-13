@@ -13,7 +13,7 @@ ENV_FILE ?= .env
 ENV_EXAMPLE ?= .env.example
 COMPOSE = ENV_FILE=$(ENV_FILE) docker compose --env-file $(ENV_FILE)
 
-# A service, for the targets that take one: make logs S=kuloffice
+# A service, for the targets that take one: make logs S=kuloffice (F=0 to print and exit)
 S ?=
 
 # Every image `make images` builds, by its .env prefix.
@@ -181,8 +181,13 @@ stop:
 restart:
 	$(COMPOSE) up -d --force-recreate $(S)
 
+# Follows by default; F=0 prints and exits (for piping into grep), N lines
+# (default 200), SINCE e.g. 15m.
+F ?= 1
+N ?= 200
+SINCE ?=
 logs:
-	$(COMPOSE) --profile portal logs -f --tail=200 $(S)
+	$(COMPOSE) --profile portal logs $(if $(filter 1,$(F)),-f) --tail=$(N) $(if $(SINCE),--since $(SINCE)) $(S)
 
 ps:
 	$(COMPOSE) --profile portal ps -a
