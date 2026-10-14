@@ -1,0 +1,490 @@
+name: kulpay-bank
+
+x-service: &service
+  restart: unless-stopped
+  networks: [kulpay]
+  logging:
+    driver: json-file
+    options:
+      max-size: 20m
+      max-file: "5"
+
+networks:
+  kulpay:
+    ipam:
+      config:
+        - subnet: ${STACK_SUBNET:-10.251.0.0/24}
+          gateway: ${STACK_GATEWAY:-10.251.0.1}
+
+volumes:
+  postgres-data:
+  minio-data:
+  blnk-redis-data:
+  blnk-typesense-data:
+  gateway-config:
+
+services:
+  db:
+    <<: *service
+    image: ${POSTGRES_IMAGE:-postgres:17-alpine}
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${DB_ROOT_PASSWORD:?set DB_ROOT_PASSWORD}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: [CMD-SHELL, "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+    stop_grace_period: 60s
+
+  db-init:
+    image: ${POSTGRES_IMAGE:-postgres:17-alpine}
+    networks: [kulpay]
+    depends_on:
+      db: {condition: service_healthy}
+    environment:
+      POSTGRES_USER: postgres
+      DB_ROOT_PASSWORD: ${DB_ROOT_PASSWORD}
+      KULOFFICE_DB_PASSWORD: ${KULOFFICE_DB_PASSWORD:?set KULOFFICE_DB_PASSWORD}
+      KEYCLOAK_DB_PASSWORD: ${KEYCLOAK_DB_PASSWORD:?set KEYCLOAK_DB_PASSWORD}
+      SOLANGE_DB_PASSWORD: ${SOLANGE_DB_PASSWORD:?set SOLANGE_DB_PASSWORD}
+      BLNK_DB_PASSWORD: ${BLNK_DB_PASSWORD:?set BLNK_DB_PASSWORD}
+      GATEWAY_DB_PASSWORD: ${GATEWAY_DB_PASSWORD:?set GATEWAY_DB_PASSWORD}
+    volumes:
+      - ./db/init.sh:/init.sh:ro
+    entrypoint: [/bin/sh, /init.sh]
+
+  blnk-redis:
+    <<: *service
+    image: ${REDIS_IMAGE:-redis:7.2.4-alpine}
+    command: [redis-server, --appendonly, "yes", --appendfsync, everysec]
+    volumes:
+      - blnk-redis-data:/data
+    healthcheck:
+      test: [CMD, redis-cli, ping]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+
+  blnk-typesense:
+    <<: *service
+    image: ${TYPESENSE_IMAGE:-typesense/typesense:29.0}
+    command:
+      - --data-dir=/data
+      - --api-key=${BLNK_TYPESENSE_API_KEY:?set BLNK_TYPESENSE_API_KEY}
+      - --listen-port=8108
+    volumes:
+      - blnk-typesense-data:/data
+    healthcheck:
+      test: [CMD, bash, -c, "exec 3<>/dev/tcp/127.0.0.1/8108 && printf 'GET /health HTTP/1.0\\r\\n\\r\\n' >&3 && grep -q '\"ok\":true' <&3"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+
+  blnk-server:
+    <<: *service
+    image: ${BLNK_IMAGE:-jerryenebeli/blnk}:${BLNK_TAG:?set BLNK_TAG}
+    entrypoint: [/bin/sh, -ec]
+    command: ["blnk migrate up && exec blnk start"]
+    depends_on:
+      db-init: {condition: service_completed_successfully}
+      blnk-redis: {condition: service_healthy}
+      blnk-typesense: {condition: service_healthy}
+    environment: &blnk-environment
+      BLNK_PROJECT_NAME: KulPay
+      BLNK_DATA_SOURCE_DNS: postgres://blnk:${BLNK_DB_PASSWORD}@db:5432/blnk?sslmode=disable
+      BLNK_REDIS_DNS: blnk-redis:6379
+      BLNK_TYPESENSE_DNS: http://blnk-typesense:8108
+      BLNK_TYPESENSE_KEY: ${BLNK_TYPESENSE_API_KEY}
+      BLNK_SERVER_PORT: "5001"
+      BLNK_SERVER_SECURE: "true"
+      BLNK_SERVER_SECRET_KEY: ${BLNK_SERVER_SECRET_KEY:?set BLNK_SERVER_SECRET_KEY}
+      BLNK_TOKENIZATION_SECRET: ${BLNK_TOKENIZATION_SECRET:?set BLNK_TOKENIZATION_SECRET}
+      BLNK_ENABLE_TELEMETRY: "false"
+      BLNK_ENABLE_OBSERVABILITY: "false"
+    healthcheck:
+      test: [CMD-SHELL, "wget -q -O /dev/null --header='X-Blnk-Key: $$BLNK_SERVER_SECRET_KEY' 'http://127.0.0.1:5001/ledgers?limit=1&offset=0'"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+
+  blnk-worker:
+    <<: *service
+    image: ${BLNK_IMAGE:-jerryenebeli/blnk}:${BLNK_TAG}
+    entrypoint: [blnk, workers]
+    depends_on:
+      blnk-server: {condition: service_healthy}
+    environment: *blnk-environment
+
+  keycloak:
+    <<: *service
+    image: ${KEYCLOAK_IMAGE}:${KEYCLOAK_TAG:?set KEYCLOAK_TAG}
+    depends_on:
+      db-init: {condition: service_completed_successfully}
+    command:
+      - start
+      - --optimized
+      - --spi-phone-auth-sms-sender--provider=http
+      - --spi-phone-auth-sms-sender--http--base-url=${OLA_SMS_BASE_URL:?set OLA_SMS_BASE_URL}
+      - --spi-phone-auth-sms-sender--http--api-key=${OLA_SMS_API_KEY:?set OLA_SMS_API_KEY}
+      - --spi-phone-auth-sms-sender--http--provider-id=${OLA_SMS_PROVIDER_ID:?set OLA_SMS_PROVIDER_ID}
+      - --spi-phone-auth-app-origins=${PASSKEY_APP_ORIGINS:-}
+    environment:
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://db:5432/keycloak
+      KC_DB_USERNAME: keycloak
+      KC_DB_PASSWORD: ${KEYCLOAK_DB_PASSWORD}
+      KC_HOSTNAME: ${KEYCLOAK_PUBLIC_URL:?set KEYCLOAK_PUBLIC_URL}
+      KC_HTTP_ENABLED: "true"
+      KC_PROXY_HEADERS: xforwarded
+      KC_HEALTH_ENABLED: "true"
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${KC_ADMIN_USER:-admin}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KC_ADMIN_PASSWORD:?set KC_ADMIN_PASSWORD}
+    ports:
+      - ${PUBLISH_ADDRESS:-127.0.0.1}:${KEYCLOAK_PORT:-9180}:8080
+    healthcheck:
+      test: [CMD-SHELL, "exec 3<>/dev/tcp/127.0.0.1/9000 && printf 'GET /health/ready HTTP/1.0\\r\\n\\r\\n' >&3 && grep -q UP <&3"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+
+  minio:
+    <<: *service
+    image: ${MINIO_IMAGE}:${MINIO_TAG:?set MINIO_TAG}
+    command: [server, /data]
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-kulpay}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD}
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: [CMD, mc, ready, local]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+
+  minio-init:
+    image: ${MC_IMAGE}:${MC_TAG:?set MC_TAG}
+    networks: [kulpay]
+    depends_on:
+      minio: {condition: service_healthy}
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-kulpay}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+      KYC_BUCKET: ${KYC_BUCKET:-kyc}
+      PENDING_BUCKET: ${PENDING_BUCKET:-kyc-pending}
+      LOGO_BUCKET: ${LOGO_BUCKET:-logos}
+      PENDING_EXPIRY_DAYS: ${PENDING_EXPIRY_DAYS:-1}
+      BOQUISSO_ACCESS_KEY: ${BOQUISSO_ACCESS_KEY:?set BOQUISSO_ACCESS_KEY}
+      BOQUISSO_SECRET_KEY: ${BOQUISSO_SECRET_KEY:?set BOQUISSO_SECRET_KEY}
+    entrypoint: [/bin/sh, -ec]
+    command:
+      - |
+        mc alias set local http://minio:9000 "$$MINIO_ROOT_USER" "$$MINIO_ROOT_PASSWORD" >/dev/null
+        mc mb --ignore-existing "local/$$KYC_BUCKET" "local/$$PENDING_BUCKET" "local/$$LOGO_BUCKET"
+        mc ilm rule ls "local/$$PENDING_BUCKET" 2>/dev/null | grep -q Expir || mc ilm rule add --expire-days "$$PENDING_EXPIRY_DAYS" "local/$$PENDING_BUCKET"
+        cat > /tmp/boquisso-policy.json <<EOF
+        {
+          "Version": "2012-10-17",
+          "Statement": [
+            {"Effect":"Allow","Action":["s3:GetBucketLocation","s3:ListBucket"],"Resource":["arn:aws:s3:::$$KYC_BUCKET","arn:aws:s3:::$$PENDING_BUCKET","arn:aws:s3:::$$LOGO_BUCKET"]},
+            {"Effect":"Allow","Action":["s3:GetObject","s3:PutObject","s3:DeleteObject"],"Resource":["arn:aws:s3:::$$KYC_BUCKET/*","arn:aws:s3:::$$PENDING_BUCKET/*","arn:aws:s3:::$$LOGO_BUCKET/*"]}
+          ]
+        }
+        EOF
+        mc admin user add local "$$BOQUISSO_ACCESS_KEY" "$$BOQUISSO_SECRET_KEY"
+        mc admin policy create local boquisso-kulpay /tmp/boquisso-policy.json
+        mc admin policy detach local boquisso-kulpay --user "$$BOQUISSO_ACCESS_KEY" >/dev/null 2>&1 || true
+        mc admin policy attach local boquisso-kulpay --user "$$BOQUISSO_ACCESS_KEY"
+
+  fileserver:
+    <<: *service
+    image: ${FILESERVER_IMAGE}:${FILESERVER_TAG:?set FILESERVER_TAG}
+    depends_on:
+      minio-init: {condition: service_completed_successfully}
+    environment:
+      API_PORT: "8080"
+      ENDPOINT: minio:9000
+      ACCESS_KEY_ID: ${BOQUISSO_ACCESS_KEY:?set BOQUISSO_ACCESS_KEY}
+      SECRET_ACCESS_KEY: ${BOQUISSO_SECRET_KEY:?set BOQUISSO_SECRET_KEY}
+      USE_SSL: "false"
+
+  gateway-config:
+    image: ${ALPINE_IMAGE:-alpine:3.20}
+    networks: [kulpay]
+    environment:
+      GATEWAY_ACCOUNT_ID: ${GATEWAY_ACCOUNT_ID:?set GATEWAY_ACCOUNT_ID}
+      GATEWAY_API_KEY: ${GATEWAY_API_KEY:?set GATEWAY_API_KEY}
+      GATEWAY_SERVICE_API_KEY: ${GATEWAY_SERVICE_API_KEY:?set GATEWAY_SERVICE_API_KEY}
+      GATEWAY_ADMIN_KEY: ${GATEWAY_ADMIN_KEY:?set GATEWAY_ADMIN_KEY}
+      GATEWAY_CHECKER_KEY: ${GATEWAY_CHECKER_KEY:?set GATEWAY_CHECKER_KEY}
+    volumes:
+      - gateway-config:/config
+    entrypoint: [/bin/sh, -ec]
+    command:
+      - |
+        umask 022
+        cat > /config/kulpay-payments.yaml.tmp <<EOF
+        keys:
+          - id: kuloffice
+            secret: "$$GATEWAY_API_KEY"
+            mode: live
+            account_id: "$$GATEWAY_ACCOUNT_ID"
+            scopes: [payments:read, payments:write, transactions:read, transactions:write, bills:read, bills:write, bills:artifacts, webhooks:manage]
+            rate_per_minute: 600
+          - id: kuloffice-service
+            secret: "$$GATEWAY_SERVICE_API_KEY"
+            mode: live
+            account_id: "$$GATEWAY_ACCOUNT_ID"
+            scopes: [service:payments:read, service:settlements:read, service:fees:write, service:webhooks:write, service:accounts:write, service:applications:write, service:keys:write, service:connector-sessions:write]
+            rate_per_minute: 600
+          - id: operator
+            secret: "$$GATEWAY_ADMIN_KEY"
+            mode: live
+            account_id: "$$GATEWAY_ACCOUNT_ID"
+            principal: operator:bank-maker
+            scopes: [admin:read, admin:write, connectors:read, connectors:write, accounts:read, accounts:write, reconciliation:read, reconciliation:write]
+            rate_per_minute: 60
+          - id: checker
+            secret: "$$GATEWAY_CHECKER_KEY"
+            mode: live
+            account_id: "$$GATEWAY_ACCOUNT_ID"
+            principal: operator:bank-checker
+            scopes: [admin:read, admin:write, accounts:read, accounts:write, reconciliation:read, reconciliation:write]
+            rate_per_minute: 60
+        EOF
+        mv /config/kulpay-payments.yaml.tmp /config/kulpay-payments.yaml
+
+  gateway:
+    <<: *service
+    image: ${GATEWAY_IMAGE}:${GATEWAY_TAG:?set GATEWAY_TAG}
+    depends_on:
+      db-init: {condition: service_completed_successfully}
+      gateway-config: {condition: service_completed_successfully}
+    command: [--config, /etc/kulpay/kulpay-payments.yaml]
+    environment:
+      KULPAY_MODE: live
+      KULPAY_DB_URL: postgres://gateway:${GATEWAY_DB_PASSWORD}@db:5432/gateway?sslmode=disable
+      KULPAY_DATABASE_URL: postgres://gateway:${GATEWAY_DB_PASSWORD}@db:5432/gateway?sslmode=disable
+      KULPAY_ENCRYPTION_KEY: ${GATEWAY_ENCRYPTION_KEY:?set GATEWAY_ENCRYPTION_KEY}
+      KULPAY_ENCRYPTION_KEY_ID: bank-1
+      KULPAY_ADDR: :9090
+      KULPAY_MGMT_ADDR: :9091
+      KULPAY_EXTERNAL_URL: ${GATEWAY_PUBLIC_URL:?set GATEWAY_PUBLIC_URL}
+      KULPAY_DEFAULT_CURRENCY: MZN
+      KULPAY_DEFAULT_COUNTRY: MZ
+      KULPAY_ACCOUNT_NAME: KulPay
+      KULPAY_ACCOUNT_ID: ${GATEWAY_ACCOUNT_ID}
+      KULPAY_LOG_FORMAT: json
+      KULPAY_OIDC_ENABLED: "false"
+      KULPAY_TRUSTED_PROXIES: ${KULPAY_TRUSTED_PROXIES:-127.0.0.0/8,::1/128,10.251.0.1}
+      KULPAY_CONNECTORS_MANUAL_ENABLED: "false"
+      KULPAY_KULOFFICE_BASE_URL: http://kuloffice:8080
+      KULPAY_KULOFFICE_TOKEN_URL: http://keycloak:8080/realms/${REALM:-kulpay}/protocol/openid-connect/token
+      KULPAY_KULOFFICE_CLIENT_ID: ${GATEWAY_KULOFFICE_CLIENT_ID:-kulpay-gateway}
+      KULPAY_KULOFFICE_CLIENT_SECRET: ${GATEWAY_KULOFFICE_CLIENT_SECRET}
+      KULPAY_KULOFFICE_AUDIENCE: ${ADMIN_CLIENT_ID:-kulpay-backend}
+    volumes:
+      - gateway-config:/etc/kulpay:ro
+    ports:
+      - ${PUBLISH_ADDRESS:-127.0.0.1}:${GATEWAY_PORT:-9480}:9090
+    healthcheck:
+      test: [CMD, kulpay-payments, healthcheck]
+      interval: 15s
+      timeout: 5s
+      retries: 8
+      start_period: 40s
+    stop_grace_period: 60s
+
+  solange-migrate:
+    image: ${SOLANGE_IMAGE}:${SOLANGE_TAG:?set SOLANGE_TAG}
+    networks: [kulpay]
+    depends_on:
+      db-init: {condition: service_completed_successfully}
+    command: [migrate]
+    environment:
+      SOLANGE_DATABASE_URL: postgres://solange:${SOLANGE_DB_PASSWORD}@db:5432/solange?sslmode=disable
+
+  solange:
+    <<: *service
+    image: ${SOLANGE_IMAGE}:${SOLANGE_TAG}
+    depends_on:
+      solange-migrate: {condition: service_completed_successfully}
+    command: [serve]
+    extra_hosts:
+      - ${KULOFFICE_PUBLIC_HOST:-core.kulpay.bank.example}:${TLS_PROXY_ADDRESS:-10.251.0.1}
+      - ${KEYCLOAK_PUBLIC_HOST:-auth.kulpay.bank.example}:${TLS_PROXY_ADDRESS:-10.251.0.1}
+    environment:
+      SOLANGE_DATABASE_URL: postgres://solange:${SOLANGE_DB_PASSWORD}@db:5432/solange?sslmode=disable
+      SOLANGE_LISTEN: :8090
+      SOLANGE_PUBLIC_URL: ${SOLANGE_PUBLIC_URL:?set SOLANGE_PUBLIC_URL}
+      SOLANGE_VISITOR_SECRET: ${SOLANGE_VISITOR_SECRET:?set SOLANGE_VISITOR_SECRET}
+      SOLANGE_ENCRYPTION_KEY: ${SOLANGE_ENCRYPTION_KEY:?set SOLANGE_ENCRYPTION_KEY}
+      SOLANGE_TRUSTED_PROXIES: ${STACK_GATEWAY:-10.251.0.1}
+      SOLANGE_KEYCLOAK_ISSUER: ${KEYCLOAK_PUBLIC_URL}/realms/${WORKFORCE_REALM:-workforce}
+      SOLANGE_KEYCLOAK_CLIENT: ${SOLANGE_CONSOLE_CLIENT_ID:-solange-console}
+    ports:
+      - ${PUBLISH_ADDRESS:-127.0.0.1}:${SOLANGE_PORT:-9580}:8090
+
+  kuloffice:
+    <<: *service
+    image: ${KULOFFICE_IMAGE}:${KULOFFICE_TAG:?set KULOFFICE_TAG}
+    env_file:
+      - path: kuloffice.env
+        required: false
+    extra_hosts:
+      - ${KEYCLOAK_PUBLIC_HOST:-auth.kulpay.bank.example}:${TLS_PROXY_ADDRESS:-10.251.0.1}
+    depends_on:
+      db-init: {condition: service_completed_successfully}
+      keycloak: {condition: service_healthy}
+      fileserver: {condition: service_started}
+      blnk-server: {condition: service_healthy}
+      gateway: {condition: service_healthy}
+      solange: {condition: service_started}
+    environment:
+      KULOFFICE_ENVIRONMENT: ${KULOFFICE_ENVIRONMENT:-production}
+      KULOFFICE_SERVER_HTTP_CORS_ALLOWED_ORIGINS: ${WEB_PUBLIC_URL},${KULPORTAL_PUBLIC_URL}
+      KULOFFICE_SERVER_HTTP_PORT: "8080"
+      KULOFFICE_SERVER_GRPC_PORT: "50051"
+      KULOFFICE_SERVER_GRPC_MAX_RECV_MSG_SIZE: "20971520"
+      KULOFFICE_SERVER_GRPC_MAX_SEND_MSG_SIZE: "20971520"
+      KULOFFICE_DATABASE_URL: postgres://kuloffice:${KULOFFICE_DB_PASSWORD}@db:5432/kuloffice?sslmode=disable
+      KULOFFICE_ADMIN_EMAIL: ${KULOFFICE_ADMIN_EMAIL:?set KULOFFICE_ADMIN_EMAIL}
+      KULOFFICE_ADMIN_PASSWORD: ${KULOFFICE_ADMIN_PASSWORD:?set KULOFFICE_ADMIN_PASSWORD}
+      KULOFFICE_ADMIN_BASIC_ENABLED: ${KULOFFICE_ADMIN_BASIC_ENABLED:-true}
+      KULOFFICE_AUTH_SERVICE_ISSUER: ${KEYCLOAK_PUBLIC_URL}/realms/${REALM:-kulpay}
+      KULOFFICE_KEYCLOAK_BASE_URL: http://keycloak:8080
+      KULOFFICE_KEYCLOAK_REALM: ${REALM:-kulpay}
+      KULOFFICE_KEYCLOAK_CLIENT_ID: ${ADMIN_CLIENT_ID:-kulpay-backend}
+      KULOFFICE_KEYCLOAK_CLIENT_SECRET: ${ADMIN_CLIENT_SECRET}
+      KULOFFICE_KEYCLOAK_ONBOARDING_ROLE: onboarding_pending
+      KULOFFICE_AUTH_WORKFORCE_ISSUERS: ${KEYCLOAK_PUBLIC_URL}/realms/${WORKFORCE_REALM:-workforce}
+      KULOFFICE_SMS_BASE_URL: ${OLA_SMS_BASE_URL}
+      KULOFFICE_SMS_API_KEY: ${OLA_SMS_API_KEY}
+      KULOFFICE_SMS_PROVIDER_ID: ${OLA_SMS_PROVIDER_ID}
+      KULOFFICE_FILESERVER_UPLOAD_URL: http://fileserver:8080/upload
+      KULOFFICE_FILESERVER_DOWNLOAD_URL: http://fileserver:8080/files
+      KULOFFICE_FILESERVER_KYC_BUCKET: ${KYC_BUCKET:-kyc}
+      KULOFFICE_FILESERVER_PENDING_BUCKET: ${PENDING_BUCKET:-kyc-pending}
+      KULOFFICE_OPERATOR_REVIEW_SYNC: "true"
+      KULOFFICE_BIOMETRICS_ENABLED: ${BIOMETRICS_ENABLED:-true}
+      KULOFFICE_ADAPTER_BLNK_BASE_URL: http://blnk-server:5001
+      KULOFFICE_ADAPTER_BLNK_API_KEY: ${BLNK_SERVER_SECRET_KEY}
+      KULOFFICE_ADAPTER_BLNK_ENVIRONMENT: ${KULOFFICE_ENVIRONMENT:-production}
+      KULOFFICE_ADAPTER_BLNK_BOOTSTRAP_ENABLED: "true"
+      KULOFFICE_EMBEDDED_FINANCIAL_WORKER: ${KULOFFICE_EMBEDDED_FINANCIAL_WORKER}
+      KULOFFICE_TOPUP_ENABLED: ${KULOFFICE_TOPUP_ENABLED:-false}
+      KULOFFICE_TOPUP_GATEWAY: kulpay-gateway
+      KULOFFICE_TOPUP_GATEWAY_URL: http://gateway:9090
+      KULOFFICE_TOPUP_GATEWAY_API_URL: http://gateway:9091/v1
+      KULOFFICE_TOPUP_GATEWAY_API_KEY: ${GATEWAY_API_KEY}
+      KULOFFICE_INCOMING_TRANSFERS_ENABLED: ${KULOFFICE_INCOMING_TRANSFERS_ENABLED:-false}
+      KULOFFICE_INCOMING_TRANSFERS_GATEWAY_ACCOUNT_ID: ${GATEWAY_ACCOUNT_ID}
+      KULOFFICE_INCOMING_TRANSFERS_WEBHOOK_SECRETS: ${KULOFFICE_INCOMING_TRANSFERS_WEBHOOK_SECRETS:-}
+      KULOFFICE_SUPPLY_ENABLED: ${KULOFFICE_SUPPLY_ENABLED:-false}
+      KULOFFICE_SUPPLY_CLEARING_BALANCE: ${KULOFFICE_SUPPLY_CLEARING_BALANCE:-}
+      KULOFFICE_PAYMENT_ACCEPTANCE_ENABLED: ${KULOFFICE_PAYMENT_ACCEPTANCE_ENABLED:-false}
+      KULOFFICE_PAYMENT_ACCEPTANCE_GATEWAY_URL: http://gateway:9091/v1
+      KULOFFICE_PAYMENT_ACCEPTANCE_GATEWAY_API_KEY: ${GATEWAY_SERVICE_API_KEY}
+      KULOFFICE_PAYMENT_ACCEPTANCE_WEBHOOK_SECRETS: ${KULOFFICE_PAYMENT_ACCEPTANCE_WEBHOOK_SECRETS:-}
+      KULOFFICE_PAYMENT_ACCEPTANCE_PROVISIONING_ENABLED: ${KULOFFICE_PAYMENT_ACCEPTANCE_PROVISIONING_ENABLED:-false}
+      KULOFFICE_PAYMENT_ACCEPTANCE_SECRET_SEAL_KEY: ${KULOFFICE_PAYMENT_ACCEPTANCE_SECRET_SEAL_KEY:-}
+      KULOFFICE_RECONCILIATION_ENABLED: ${KULOFFICE_RECONCILIATION_ENABLED:-false}
+      KULOFFICE_CHECKOUT_PROVIDER_GATEWAY_CLIENT_ID: ${GATEWAY_KULOFFICE_CLIENT_ID:-kulpay-gateway}
+      KULOFFICE_CHECKOUT_PROVIDER_APPROVAL_URL: ${WEB_PUBLIC_URL}/pagar/{id}
+      KULOFFICE_CHECKOUT_PROVIDER_GATEWAY_CALLBACK_URL: http://gateway:9090
+      KULOFFICE_CHECKOUT_PROVIDER_WAKEUP_SIGNING_SECRETS: ${KULOFFICE_CHECKOUT_PROVIDER_WAKEUP_SIGNING_SECRETS:-}
+      KULOFFICE_CHECKOUT_PROVIDER_WAKEUP_TEST_SIGNING_SECRETS: ${KULOFFICE_CHECKOUT_PROVIDER_WAKEUP_TEST_SIGNING_SECRETS:-}
+      KULOFFICE_SOLANGE_BASE_URL: http://solange:8090
+      KULOFFICE_SOLANGE_API_KEY: ${KULOFFICE_SOLANGE_API_KEY:-}
+      KULOFFICE_SOLANGE_WEBHOOK_SECRETS: ${KULOFFICE_SOLANGE_WEBHOOK_SECRETS:-}
+      KULOFFICE_SOLANGE_WEB_URL: ${WEB_PUBLIC_URL}
+      KULOFFICE_SOLANGE_PUBLIC_API_URL: ${KULOFFICE_PUBLIC_URL}
+      KULOFFICE_SOLANGE_LOGO_BUCKET: ${LOGO_BUCKET:-logos}
+      KULOFFICE_SOLANGE_PERSONAL_PAYMENT_REQUESTS: ${PERSONAL_PAYMENT_REQUESTS:-false}
+    ports:
+      - ${PUBLISH_ADDRESS:-127.0.0.1}:${KULOFFICE_PORT:-9280}:8080
+
+  web:
+    <<: *service
+    image: ${WEB_IMAGE}:${WEB_TAG:?set WEB_TAG}
+    depends_on:
+      kuloffice: {condition: service_started}
+    extra_hosts:
+      - ${KEYCLOAK_PUBLIC_HOST:-auth.kulpay.bank.example}:${TLS_PROXY_ADDRESS:-10.251.0.1}
+    environment:
+      PORT: "3000"
+      HOSTNAME: 0.0.0.0
+      KULPAY_WEB_URL: ${WEB_PUBLIC_URL:?set WEB_PUBLIC_URL}
+      KULPAY_KEYCLOAK_ISSUER: ${KEYCLOAK_PUBLIC_URL}/realms/${REALM:-kulpay}
+      KULPAY_KEYCLOAK_CLIENT_ID: ${WEB_CLIENT_ID:-kulpay-web}
+      KULPAY_KEYCLOAK_PASSKEY_CLIENT_ID: ${PASSKEY_CLIENT_ID:-kulpay-web-passkey}
+      KULPAY_API_URL: http://kuloffice:8080
+      KULPAY_SESSION_SECRET: ${KULPAY_SESSION_SECRET:?set KULPAY_SESSION_SECRET}
+    ports:
+      - ${PUBLISH_ADDRESS:-127.0.0.1}:${WEB_PORT:-9380}:3000
+
+  solange-console:
+    <<: *service
+    image: ${SOLANGE_CONSOLE_IMAGE}:${SOLANGE_CONSOLE_TAG:?set SOLANGE_CONSOLE_TAG}
+    depends_on:
+      solange: {condition: service_started}
+    extra_hosts:
+      - ${KEYCLOAK_PUBLIC_HOST:-auth.kulpay.bank.example}:${TLS_PROXY_ADDRESS:-10.251.0.1}
+    environment:
+      SOLANGE_CONSOLE_URL: ${SOLANGE_CONSOLE_PUBLIC_URL:?set SOLANGE_CONSOLE_PUBLIC_URL}
+      SOLANGE_KEYCLOAK_ISSUER: ${KEYCLOAK_PUBLIC_URL}/realms/${WORKFORCE_REALM:-workforce}
+      SOLANGE_KEYCLOAK_CLIENT_ID: ${SOLANGE_CONSOLE_CLIENT_ID:-solange-console}
+      SOLANGE_API_URL: http://solange:8090
+      SOLANGE_PUBLIC_URL: ${SOLANGE_PUBLIC_URL}
+      SOLANGE_SESSION_SECRET: ${SOLANGE_SESSION_SECRET:?set SOLANGE_SESSION_SECRET}
+    ports:
+      - ${PUBLISH_ADDRESS:-127.0.0.1}:${SOLANGE_CONSOLE_PORT:-9680}:3200
+
+  kulportal:
+    <<: *service
+    image: ${KULPORTAL_IMAGE}:${KULPORTAL_TAG:?set KULPORTAL_TAG}
+    depends_on:
+      kuloffice: {condition: service_started}
+    extra_hosts:
+      - ${KEYCLOAK_PUBLIC_HOST:-auth.kulpay.bank.example}:${TLS_PROXY_ADDRESS:-10.251.0.1}
+    environment:
+      PORT: "3000"
+      HOSTNAME: 0.0.0.0
+      KULOFFICE_URL: http://kuloffice:8080
+      OIDC_ISSUER: ${KEYCLOAK_PUBLIC_URL}/realms/${WORKFORCE_REALM:-workforce}
+      OIDC_CLIENT_ID: kulportal
+      OIDC_CLIENT_SECRET: ${KULPORTAL_CLIENT_SECRET:?set KULPORTAL_CLIENT_SECRET}
+      PORTAL_URL: ${KULPORTAL_PUBLIC_URL:?set KULPORTAL_PUBLIC_URL}
+      SESSION_SECRET: ${KULPORTAL_SESSION_SECRET:?set KULPORTAL_SESSION_SECRET}
+    ports:
+      - ${PUBLISH_ADDRESS:-127.0.0.1}:${KULPORTAL_PORT:-9780}:3000
+
+  provisioner:
+    image: ${PROVISIONER_IMAGE}:${PROVISIONER_TAG:?set PROVISIONER_TAG}
+    profiles: [provisioning]
+    networks: [kulpay]
+    env_file: ["${ENV_FILE:-.env}"]
+    volumes:
+      - ./provisioning:/bank:ro
+    environment:
+      KEYCLOAK_URL: http://keycloak:8080
+      KULOFFICE_URL: http://kuloffice:8080
+      GATEWAY_MANAGEMENT_URL: http://gateway:9091/v1
+    depends_on:
+      keycloak: {condition: service_healthy}
+      kuloffice: {condition: service_started}
+    entrypoint: [/bin/sh]
+    command: [/bank/init.sh]
+
+  backup-helper:
+    image: ${ALPINE_IMAGE:-alpine:3.20}
+    profiles: [maintenance]
+    networks: [kulpay]
+    volumes:
+      - minio-data:/source:ro
+    entrypoint: [tar]

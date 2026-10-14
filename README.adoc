@@ -7,6 +7,13 @@
 Everything needed to test kuloffice end to end on one machine, in one compose
 file, configured by one command.
 
+[NOTE]
+====
+For the production-only, single-host bank installation package, see
+link:bank-deploy/README.md[bank deployment kit] and its
+link:bank-deploy/INSTALLATION_MANUAL.md[installation manual].
+====
+
 == What runs
 
 [cols="1,3"]

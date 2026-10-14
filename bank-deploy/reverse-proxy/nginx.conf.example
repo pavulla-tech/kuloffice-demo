@@ -1,0 +1,106 @@
+# Example only. Replace server names and certificate paths with bank-managed
+# values. Keep the Compose ports bound to 127.0.0.1.
+
+map $http_upgrade $connection_upgrade {
+    default upgrade;
+    '' close;
+}
+
+server {
+    listen 443 ssl http2;
+    server_name auth.kulpay.bank.example;
+    ssl_certificate /etc/pki/kulpay/auth-fullchain.pem;
+    ssl_certificate_key /etc/pki/kulpay/auth-key.pem;
+    location / {
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header X-Forwarded-Port 443;
+        proxy_pass http://127.0.0.1:9180;
+    }
+}
+
+server {
+    listen 443 ssl http2;
+    server_name core.kulpay.bank.example;
+    ssl_certificate /etc/pki/kulpay/core-fullchain.pem;
+    ssl_certificate_key /etc/pki/kulpay/core-key.pem;
+    client_max_body_size 50m;
+    proxy_read_timeout 120s;
+    location / {
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_pass http://127.0.0.1:9280;
+    }
+}
+
+server {
+    listen 443 ssl http2;
+    server_name app.kulpay.bank.example;
+    ssl_certificate /etc/pki/kulpay/app-fullchain.pem;
+    ssl_certificate_key /etc/pki/kulpay/app-key.pem;
+    client_max_body_size 50m;
+    location / {
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection $connection_upgrade;
+        proxy_pass http://127.0.0.1:9380;
+    }
+}
+
+server {
+    listen 443 ssl http2;
+    server_name payments.kulpay.bank.example;
+    ssl_certificate /etc/pki/kulpay/payments-fullchain.pem;
+    ssl_certificate_key /etc/pki/kulpay/payments-key.pem;
+    location / {
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_pass http://127.0.0.1:9480;
+    }
+}
+
+server {
+    listen 443 ssl http2;
+    server_name qr.kulpay.bank.example;
+    ssl_certificate /etc/pki/kulpay/qr-fullchain.pem;
+    ssl_certificate_key /etc/pki/kulpay/qr-key.pem;
+    location / {
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_pass http://127.0.0.1:9580;
+    }
+}
+
+server {
+    listen 443 ssl http2;
+    server_name qr-console.kulpay.bank.example;
+    ssl_certificate /etc/pki/kulpay/qr-console-fullchain.pem;
+    ssl_certificate_key /etc/pki/kulpay/qr-console-key.pem;
+    location / {
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_pass http://127.0.0.1:9680;
+    }
+}
+
+server {
+    listen 443 ssl http2;
+    server_name portal.kulpay.bank.example;
+    ssl_certificate /etc/pki/kulpay/portal-fullchain.pem;
+    ssl_certificate_key /etc/pki/kulpay/portal-key.pem;
+    location / {
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection $connection_upgrade;
+        proxy_pass http://127.0.0.1:9780;
+    }
+}
