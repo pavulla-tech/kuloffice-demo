@@ -296,6 +296,11 @@ services:
       retries: 4
       start_period: 40s
     stop_grace_period: 60s
+    # Loopback only, for Apache: the public root (hosted checkout, payment
+    # links, portal, docs) and the management API with the operator dashboard.
+    ports:
+      - "127.0.0.1:${GATEWAY_PORT:-9980}:9090"
+      - "127.0.0.1:${GATEWAY_MGMT_PORT:-9981}:9091"
 
   # Points the gateway's live bindings at the simulator. Idempotent: the
   # gateway keeps each binding's ID, which kuloffice's collection balances use.
