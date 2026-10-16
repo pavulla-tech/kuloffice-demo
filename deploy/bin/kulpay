@@ -477,8 +477,8 @@ kuloffice_secrets() {
 # The Gateway integration's generated values, made once into .env (not
 # shown) on every deploy, because compose needs them for every unit: KulOffice's
 # Gateway tenant (27 alphanumerics, fixed from then on), its platform service
-# key, the Keycloak secret of the Gateway's client and the second operator
-# (checker) key.
+# key, the Keycloak secret of the Gateway's client, the second operator
+# (checker) key and the report signing key (an Ed25519 seed, base64).
 gateway_secrets() {
   [[ -n $(env_get GATEWAY_ACCOUNT_ID || true) ]] ||
     env_set GATEWAY_ACCOUNT_ID "$(head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n' | cut -c1-27)"
@@ -487,6 +487,8 @@ gateway_secrets() {
     [[ -n $(env_get "$k" || true) ]] ||
       env_set "$k" "$(head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n')"
   done
+  [[ -n $(env_get GATEWAY_AUDIT_SIGNING_KEY || true) ]] ||
+    env_set GATEWAY_AUDIT_SIGNING_KEY "$(head -c 32 /dev/urandom | base64 | tr -d '\n')"
 }
 
 cmd_deploy() {

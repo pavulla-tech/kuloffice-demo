@@ -177,6 +177,10 @@ services:
       GATEWAY_CHECKER_KEY: ${GATEWAY_CHECKER_KEY:?set GATEWAY_CHECKER_KEY}
       GATEWAY_ACCOUNT_ID: ${GATEWAY_ACCOUNT_ID:?set GATEWAY_ACCOUNT_ID}
       GATEWAY_ENCRYPTION_KEY: ${GATEWAY_ENCRYPTION_KEY:?set GATEWAY_ENCRYPTION_KEY}
+      # A gateway refuses to boot on a scope it does not know. The default is
+      # for kul-aparatus-compatibility (v0.1.1-alpha01 on); v0.1.1-alpha00 took
+      # the service:* list in .env.example.
+      GATEWAY_SERVICE_SCOPES: ${GATEWAY_SERVICE_SCOPES:-payments:read, transactions:read}
     volumes:
       - gateway-config:/config
     entrypoint:
@@ -210,8 +214,9 @@ services:
             # Operator-issued service scopes only, never accounts:write: payment
             # and payable read-back, fee instructions, merchant webhooks, and
             # merchant provisioning by account_id (IG-76/IG-67: tenant,
-            # application, application-bound keys, connector sessions).
-            scopes: [service:payments:read, service:settlements:read, service:fees:write, service:webhooks:write, service:accounts:write, service:applications:write, service:keys:write, service:connector-sessions:write]
+            # application, application-bound keys, connector sessions), on a
+            # gateway that has the service API (GATEWAY_SERVICE_SCOPES).
+            scopes: [$$GATEWAY_SERVICE_SCOPES]
             rate_per_minute: 600
           - id: operator
             secret: "$$GATEWAY_ADMIN_KEY"
@@ -252,6 +257,10 @@ services:
       KULPAY_DATABASE_URL: *gateway-db
       KULPAY_ENCRYPTION_KEY: ${GATEWAY_ENCRYPTION_KEY:?set GATEWAY_ENCRYPTION_KEY}
       KULPAY_ENCRYPTION_KEY_ID: dev-1
+      # Signs certification, reconciliation and regulatory reports; a live
+      # gateway refuses to start without it (v0.1.1-alpha01 on).
+      KULPAY_AUDIT_SIGNING_KEY: ${GATEWAY_AUDIT_SIGNING_KEY:?set GATEWAY_AUDIT_SIGNING_KEY (openssl rand -base64 32)}
+      KULPAY_AUDIT_SIGNING_KEY_ID: audit-1
       KULPAY_ADDR: ":9090"
       KULPAY_MGMT_ADDR: ":9091"
       KULPAY_EXTERNAL_URL: http://gateway:9090
