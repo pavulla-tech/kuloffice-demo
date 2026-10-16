@@ -265,7 +265,10 @@ services:
       KULPAY_AUDIT_SIGNING_KEY_ID: audit-1
       KULPAY_ADDR: ":9090"
       KULPAY_MGMT_ADDR: ":9091"
-      KULPAY_EXTERNAL_URL: http://gateway:9090
+      # The browser-visible origin: hosted checkout, payment links, docs and
+      # OAuth redirects are built on it. Payments' own callback URLs come from
+      # the caller (KulOffice), so containers still reach gateway:9090.
+      KULPAY_EXTERNAL_URL: ${GATEWAY_PUBLIC_URL:-https://gateway.kulpay.pavulla.com}
       KULPAY_DEFAULT_CURRENCY: MZN
       KULPAY_DEFAULT_COUNTRY: MZ
       KULPAY_ACCOUNT_NAME: KulPay
