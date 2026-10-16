@@ -258,8 +258,10 @@ services:
       KULPAY_ENCRYPTION_KEY: ${GATEWAY_ENCRYPTION_KEY:?set GATEWAY_ENCRYPTION_KEY}
       KULPAY_ENCRYPTION_KEY_ID: dev-1
       # Signs certification, reconciliation and regulatory reports; a live
-      # gateway refuses to start without it (v0.1.1-alpha01 on).
-      KULPAY_AUDIT_SIGNING_KEY: ${GATEWAY_AUDIT_SIGNING_KEY:?set GATEWAY_AUDIT_SIGNING_KEY (openssl rand -base64 32)}
+      # gateway refuses to start without it (v0.1.1-alpha01 on). Not required
+      # here: compose would refuse every command until a deploy generated it
+      # (bin/kulpay secrets does it now).
+      KULPAY_AUDIT_SIGNING_KEY: ${GATEWAY_AUDIT_SIGNING_KEY:-}
       KULPAY_AUDIT_SIGNING_KEY_ID: audit-1
       KULPAY_ADDR: ":9090"
       KULPAY_MGMT_ADDR: ":9091"
