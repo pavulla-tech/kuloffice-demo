@@ -178,9 +178,10 @@ services:
       GATEWAY_ACCOUNT_ID: ${GATEWAY_ACCOUNT_ID:?set GATEWAY_ACCOUNT_ID}
       GATEWAY_ENCRYPTION_KEY: ${GATEWAY_ENCRYPTION_KEY:?set GATEWAY_ENCRYPTION_KEY}
       # A gateway refuses to boot on a scope it does not know. The default is
-      # for kul-aparatus-compatibility (v0.1.1-alpha01 on); v0.1.1-alpha00 took
-      # the service:* list in .env.example.
-      GATEWAY_SERVICE_SCOPES: ${GATEWAY_SERVICE_SCOPES:-payments:read, transactions:read}
+      # the ig1-collection-evidence line's service API (v0.1.1-alpha00, alpha02
+      # on); v0.1.1-alpha01 (kul-aparatus-compatibility) has none and needs
+      # GATEWAY_SERVICE_SCOPES=payments:read, transactions:read.
+      GATEWAY_SERVICE_SCOPES: ${GATEWAY_SERVICE_SCOPES:-service:payments:read, service:settlements:read, service:fees:write, service:webhooks:write, service:accounts:write, service:applications:write, service:keys:write, service:connector-sessions:write}
     volumes:
       - gateway-config:/config
     entrypoint:
