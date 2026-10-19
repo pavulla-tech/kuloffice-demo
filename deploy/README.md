@@ -88,13 +88,19 @@ starts KulOffice so the topology bootstrap runs. It does not partially delete
 ledger rows and does not touch customer authentication, KulOffice, Solange, or
 MinIO data. The printed backup can be restored with `make restore DB=blnk ...`.
 
-**Top-ups on a development server.** kuloffice collects through the stack's
-own gateway, whose live bindings point at the PSP simulator: `gateway-bind`
-(re)writes them on every start, and kuloffice waits for it. A top-up's payer
-approves or declines it on the simulator's page; on this server those are live
-payments. The simulator and `gateway-bind` must never run beside real provider
-credentials; see `kuloffice/docs/security-plan.md` for the controls planned
-before production.
+**Provider integration on a development server.** kuloffice uses the stack's
+own gateway, whose live M-Pesa, e-Mola and card bindings point at the PSP
+simulator: `gateway-bind` (re)writes them and their callback destinations on
+every start, and kuloffice waits for it. The simulator workbench covers charges,
+payouts, name lookup, provider float, status recovery, card capture/refund,
+signed callbacks and failure scenarios. With a QA partner key and statement
+profile in the `SIMULATOR_GATEWAY_*` settings it also calls the gateway as a
+partner bank for incoming transfers, cash deposits, statements and settlement
+reports. Bill suppliers remain excluded until their gateway integration is
+updated. On this server simulated provider operations are live-mode
+transactions. The simulator and `gateway-bind` must never run beside real
+provider credentials; see `kuloffice/docs/security-plan.md` for the controls
+planned before production.
 
 The gateway and simulator images never go to a registry (`localhost/…`
 names cannot be pulled). On the laptop, `make bundle` builds both at the tags
