@@ -40,6 +40,11 @@
     {"event": "orientu.funds_released", "channel": "inbox", "text": "{amount} da causa \"{reason}\" estão agora no seu saldo."},
     {"event": "orientu.contribution_refunded", "channel": "inbox", "text": "A sua contribuição de {amount} para \"{reason}\" foi devolvida."},
     {"event": "orientu.funds_held", "channel": "inbox", "text": "{amount} do seu saldo ficam indisponíveis até {when}."},
-    {"event": "orientu.funds_hold_released", "channel": "inbox", "text": "{amount} do seu saldo estão disponíveis de novo."}
+    {"event": "orientu.funds_hold_released", "channel": "inbox", "text": "{amount} do seu saldo estão disponíveis de novo."},
+
+    {"event": "business_plan.change_submitted", "channel": "inbox", "text": "Recebemos o pedido para passar ao plano {plan}. Mantém o plano {current_plan} até à decisão."},
+    {"event": "business_plan.change_approved", "channel": "inbox", "text": "O seu negócio passou ao plano {plan}. Os novos limites já se aplicam."},
+    {"event": "business_plan.change_rejected", "channel": "inbox", "text": "O pedido para passar ao plano {plan} não foi aprovado: {note}"},
+    {"event": "business_plan.change_cancelled", "channel": "inbox", "text": "O pedido para passar ao plano {plan} foi cancelado."}
   ]
 }
