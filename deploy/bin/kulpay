@@ -11,6 +11,7 @@
 #   kulpay restore  <database> <file> --yes      replace a database
 #   kulpay provision                             init, Gateway events, then QR codes (idempotent)
 #   kulpay secrets                               generate the missing generated values into .env
+#   kulpay operator-roles [grant ROLE...]        list operator roles; give a role every permission
 #
 # Options anywhere: --actor NAME (who asked; CI passes the GitHub user).
 #
@@ -477,17 +478,66 @@ kuloffice_secrets() {
 # The Gateway integration's generated values, made once into .env (not
 # shown) on every deploy, because compose needs them for every unit: KulOffice's
 # Gateway tenant (27 alphanumerics, fixed from then on), its platform service
-# key, the Keycloak secret of the Gateway's client and the second operator
-# (checker) key.
+# key, the Keycloak secret of the Gateway's client, the second operator
+# (checker) key, the cash-deposit lookup key and secret, and the report
+# signing key (an Ed25519 seed, base64).
 gateway_secrets() {
   [[ -n $(env_get GATEWAY_ACCOUNT_ID || true) ]] ||
     env_set GATEWAY_ACCOUNT_ID "$(head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n' | cut -c1-27)"
   local k
-  for k in GATEWAY_SERVICE_API_KEY GATEWAY_KULOFFICE_CLIENT_SECRET GATEWAY_CHECKER_KEY; do
+  for k in GATEWAY_SERVICE_API_KEY GATEWAY_KULOFFICE_CLIENT_SECRET GATEWAY_CHECKER_KEY \
+      KULPAY_CMS_LOOKUP_API_KEY KULPAY_CMS_LOOKUP_SIGNING_SECRET; do
     [[ -n $(env_get "$k" || true) ]] ||
       env_set "$k" "$(head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n')"
   done
+  [[ -n $(env_get GATEWAY_AUDIT_SIGNING_KEY || true) ]] ||
+    env_set GATEWAY_AUDIT_SIGNING_KEY "$(head -c 32 /dev/urandom | base64 | tr -d '\n')"
 }
+
+# Development stacks only (DEV_ADMIN_EMAIL and DEV_ADMIN_PASSWORD in .env;
+# empty in production): the developers' admin operator, kept in place after
+# every deploy that can lose it or that brings new permissions. Its workforce
+# account (with that password), the operator, and the Administradores role
+# holding every permission in kuloffice's catalogue (make operator ROLE=ADMIN),
+# and the Solange console's admin role (QR templates, apps, keys).
+dev_admin() {
+  local email pw
+  email=$(env_get DEV_ADMIN_EMAIL || true); pw=$(env_get DEV_ADMIN_PASSWORD || true)
+  # Quoted in .env ('…' or "…", for a # in it): the value without its quotes.
+  pw=${pw#[\'\"]}; pw=${pw%[\'\"]}
+  [[ -n $email && -n $pw ]] || return 0
+  say "development admin: $email, every operator permission"
+  compose --profile tools run --rm -e STAFF_EMAIL="$email" -e STAFF_PASSWORD="$pw" -e STAFF_PASSWORD_PERMANENT=1 \
+    -e STAFF_FIRST_NAME=Developers -e STAFF_LAST_NAME=Pavulla -e KULOFFICE_ROLE=ADMIN -e SOLANGE_ROLES=admin \
+    tools /tools/operator.sh || { say "warning: the development admin was not seeded (make operator to retry)"; return 0; }
+  dev_claim_sends
+  say "development texts: the products' notification texts, where none is approved"
+  compose --profile tools run --rm --entrypoint python3 -e DEV_ADMIN_EMAIL="$email" -e DEV_ADMIN_PASSWORD="$pw" \
+    -e WORKFORCE_ISSUER="$(env_get KEYCLOAK_PUBLIC_URL)/realms/$(env_get WORKFORCE_REALM || echo workforce)" \
+    tools /tools/dev_rules.py || say "warning: the development texts were not seeded (bin/kulpay provision to retry)"
+}
+
+# Development stacks: sends to numbers without an account, on. The hold
+# balance is left to KulOffice's BLNK bootstrap (v0.1.8-alpha09 and later;
+# an older KulOffice would refuse to start without it). kuloffice.env is
+# only added to, never rewritten; kuloffice is recreated to read it.
+dev_claim_sends() {
+  local tag file=kuloffice.env added=no kv
+  tag=$(unit_tag kuloffice || true)
+  is_version "$tag" && [[ $(version_cmp "$tag" v0.1.8-alpha09) -ge 0 ]] || return 0
+  touch "$file"
+  for kv in KULOFFICE_CLAIM_SENDS_ENABLED=true KULOFFICE_CLAIM_SENDS_RESERVATION_MARGIN=48h KULOFFICE_CLAIM_SENDS_MAX_CAPACITY=2; do
+    grep -q "^${kv%%=*}=" "$file" || { echo "$kv" >> "$file"; added=yes; }
+  done
+  [[ $added == yes ]] || return 0
+  say "claim sends on in $file; recreating kuloffice"
+  compose up -d --force-recreate kuloffice || true
+  check_unit kuloffice || say "warning: kuloffice is not healthy after turning claim sends on (see make logs)"
+}
+
+# The units whose deploy can lose the admin (keycloak: staff accounts;
+# gateway and kuloffice: kuloffice's operators) or add permissions.
+dev_admin_after() { case $1 in kuloffice|keycloak|gateway) dev_admin ;; esac; }
 
 cmd_deploy() {
   local unit=${1:-} tag=${2:-} cur mode=update db backups="" prev_files
@@ -515,6 +565,7 @@ cmd_deploy() {
       hist_add "$unit" "$tag" deploy; log_release deploy "$unit" "$cur" "$tag" ok
       prune_images "$unit"; prune_resets
       say "deployed $unit $tag"
+      dev_admin_after "$unit"
       return 0
     fi
     say "rolling back to ${cur:-nothing}"
@@ -543,6 +594,7 @@ cmd_deploy() {
     for m in $(unit_dependents "$unit"); do log_release wiped "$m" "$(unit_tag "$m")" "$(unit_tag "$m")" ok "by $unit $tag"; done
     prune_images "$unit"; prune_resets
     say "deployed $unit $tag on fresh data"
+    dev_admin_after "$unit"
     return 0
   fi
   say "the reset failed: restoring everything it wiped"
@@ -688,6 +740,7 @@ cmd_provision() {
   say "QR codes: KulPay in Solange, kuloffice's key and webhook"
   ENV_FILE=$ENV_FILE COMPOSE="docker compose --env-file $ENV_FILE" sh scripts/solange-kulpay.sh
   check_unit kuloffice
+  dev_admin
   echo
   echo "Configured. Still by hand (deploy/README.md):"
   [[ -n $(env_get PASSKEY_APP_ORIGINS || true) ]] || echo "  - PASSKEY_APP_ORIGINS is empty: passkeys from the mobile apps are refused"
@@ -709,6 +762,15 @@ cmd_restore() {
   say "restored $1; recreate its service (make restart S=…)"
 }
 
+# Operator roles through KulOffice's role API, as the env admin (Basic).
+cmd_operator_roles() {
+  command -v python3 >/dev/null || die "python3 is needed"
+  KO_URL="http://127.0.0.1:$(env_get KULOFFICE_PORT || true)"
+  [[ $KO_URL == "http://127.0.0.1:" ]] && KO_URL=http://127.0.0.1:9280
+  KO_USER=$(env_get KULOFFICE_ADMIN_EMAIL) KO_PASS=$(env_get KULOFFICE_ADMIN_PASSWORD) KO_URL=$KO_URL \
+    python3 lib/operator_roles.py "$@"
+}
+
 args=()
 while (($#)); do
   case $1 in
@@ -728,6 +790,7 @@ case $command in
   backup) cmd_backup "$@" ;;
   restore) cmd_restore "$@" ;;
   provision) cmd_provision ;;
+  operator-roles) cmd_operator_roles "$@" ;;
   secrets) gateway_secrets; kuloffice_secrets; say "generated values present in $ENV_FILE (not shown)" ;;
-  *) sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'; [[ $command == help ]] ;;
+  *) sed -n '2,22p' "$0" | sed 's/^# \{0,1\}//'; [[ $command == help ]] ;;
 esac

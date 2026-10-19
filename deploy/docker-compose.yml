@@ -177,6 +177,11 @@ services:
       GATEWAY_CHECKER_KEY: ${GATEWAY_CHECKER_KEY:?set GATEWAY_CHECKER_KEY}
       GATEWAY_ACCOUNT_ID: ${GATEWAY_ACCOUNT_ID:?set GATEWAY_ACCOUNT_ID}
       GATEWAY_ENCRYPTION_KEY: ${GATEWAY_ENCRYPTION_KEY:?set GATEWAY_ENCRYPTION_KEY}
+      # A gateway refuses to boot on a scope it does not know. The default is
+      # the ig1-collection-evidence line's service API (v0.1.1-alpha00, alpha02
+      # on); v0.1.1-alpha01 (kul-aparatus-compatibility) has none and needs
+      # GATEWAY_SERVICE_SCOPES=payments:read, transactions:read.
+      GATEWAY_SERVICE_SCOPES: ${GATEWAY_SERVICE_SCOPES:-service:payments:read, service:settlements:read, service:fees:write, service:webhooks:write, service:accounts:write, service:applications:write, service:keys:write, service:connector-sessions:write}
     volumes:
       - gateway-config:/config
     entrypoint:
@@ -200,7 +205,8 @@ services:
             mode: live
             account_id: "$$GATEWAY_ACCOUNT_ID"
             label: "kuloffice account integrations"
-            scopes: [payments:read, payments:write, transactions:read, transactions:write, bills:read, bills:write, bills:artifacts, webhooks:manage]
+            # links:* for Orientu's payment links (POST/DELETE /v1/admin/links).
+            scopes: [payments:read, payments:write, transactions:read, transactions:write, links:read, links:write, bills:read, bills:write, bills:artifacts, webhooks:manage]
             rate_per_minute: 600
           - id: kuloffice-service
             secret: "$$GATEWAY_SERVICE_API_KEY"
@@ -210,8 +216,9 @@ services:
             # Operator-issued service scopes only, never accounts:write: payment
             # and payable read-back, fee instructions, merchant webhooks, and
             # merchant provisioning by account_id (IG-76/IG-67: tenant,
-            # application, application-bound keys, connector sessions).
-            scopes: [service:payments:read, service:settlements:read, service:fees:write, service:webhooks:write, service:accounts:write, service:applications:write, service:keys:write, service:connector-sessions:write]
+            # application, application-bound keys, connector sessions), on a
+            # gateway that has the service API (GATEWAY_SERVICE_SCOPES).
+            scopes: [$$GATEWAY_SERVICE_SCOPES]
             rate_per_minute: 600
           - id: operator
             secret: "$$GATEWAY_ADMIN_KEY"
@@ -252,9 +259,18 @@ services:
       KULPAY_DATABASE_URL: *gateway-db
       KULPAY_ENCRYPTION_KEY: ${GATEWAY_ENCRYPTION_KEY:?set GATEWAY_ENCRYPTION_KEY}
       KULPAY_ENCRYPTION_KEY_ID: dev-1
+      # Signs certification, reconciliation and regulatory reports; a live
+      # gateway refuses to start without it (v0.1.1-alpha01 on). Not required
+      # here: compose would refuse every command until a deploy generated it
+      # (bin/kulpay secrets does it now).
+      KULPAY_AUDIT_SIGNING_KEY: ${GATEWAY_AUDIT_SIGNING_KEY:-}
+      KULPAY_AUDIT_SIGNING_KEY_ID: audit-1
       KULPAY_ADDR: ":9090"
       KULPAY_MGMT_ADDR: ":9091"
-      KULPAY_EXTERNAL_URL: http://gateway:9090
+      # The browser-visible origin: hosted checkout, payment links, docs and
+      # OAuth redirects are built on it. Payments' own callback URLs come from
+      # the caller (KulOffice), so containers still reach gateway:9090.
+      KULPAY_EXTERNAL_URL: ${GATEWAY_PUBLIC_URL:-https://gateway.kulpay.pavulla.com}
       KULPAY_DEFAULT_CURRENCY: MZN
       KULPAY_DEFAULT_COUNTRY: MZ
       KULPAY_ACCOUNT_NAME: KulPay
@@ -278,6 +294,14 @@ services:
       KULPAY_KULOFFICE_AUDIENCE: ${ADMIN_CLIENT_ID:-kulpay-backend}
       KULPAY_KULOFFICE_TIMEOUT: 30s
       KULPAY_KULOFFICE_FEE_INSTRUCTION_OVERDUE: 24h
+      # Cash deposits at other PSPs: the platform's kulpay_cms connector asks
+      # KulOffice's POST /v1/beneficiaries/lookup who a deposit reference is,
+      # with a key and an HMAC signature both sides share (bin/kulpay
+      # generates them).
+      KULPAY_CONNECTORS_KULPAY_CMS_ENABLED: "true"
+      KULPAY_CONNECTORS_KULPAY_CMS_BASE_URL: http://kuloffice:8080
+      KULPAY_CONNECTORS_KULPAY_CMS_API_KEY: ${KULPAY_CMS_LOOKUP_API_KEY:-}
+      KULPAY_CONNECTORS_KULPAY_CMS_SIGNING_SECRET: ${KULPAY_CMS_LOOKUP_SIGNING_SECRET:-}
     volumes:
       - gateway-config:/etc/kulpay:ro
     healthcheck:
@@ -287,6 +311,11 @@ services:
       retries: 4
       start_period: 40s
     stop_grace_period: 60s
+    # Loopback only, for Apache: the public root (hosted checkout, payment
+    # links, portal, docs) and the management API with the operator dashboard.
+    ports:
+      - "127.0.0.1:${GATEWAY_PORT:-9980}:9090"
+      - "127.0.0.1:${GATEWAY_MGMT_PORT:-9981}:9091"
 
   # Points the gateway's live bindings at the simulator. Idempotent: the
   # gateway keeps each binding's ID, which kuloffice's collection balances use.
@@ -526,6 +555,15 @@ services:
       KULOFFICE_INCOMING_TRANSFERS_WEBHOOK_SECRETS: ${KULOFFICE_INCOMING_TRANSFERS_WEBHOOK_SECRETS:-}
       KULOFFICE_INCOMING_TRANSFERS_POLL_INTERVAL: 5m
       KULOFFICE_INCOMING_TRANSFERS_MAX_CAPACITY: "2"
+      # The Gateway's cash-deposit reference lookup (the same pair as its
+      # kulpay_cms connector); both set turn POST /v1/beneficiaries/lookup on.
+      KULOFFICE_INCOMING_TRANSFERS_LOOKUP_API_KEYS: ${KULPAY_CMS_LOOKUP_API_KEY:-}
+      KULOFFICE_INCOMING_TRANSFERS_LOOKUP_SIGNING_SECRETS: ${KULPAY_CMS_LOOKUP_SIGNING_SECRET:-}
+      # Orientu's escrow and tips: Conta Pagamento products of an account
+      # KulOffice owns. Empty: causes take immediate only, and no tips.
+      KULOFFICE_ORIENTU_CUSTODY_PRODUCT_ID: ${KULOFFICE_ORIENTU_CUSTODY_PRODUCT_ID:-}
+      KULOFFICE_ORIENTU_TIPS_PRODUCT_ID: ${KULOFFICE_ORIENTU_TIPS_PRODUCT_ID:-}
+      KULOFFICE_APPROVALS_SINGLE_OPERATOR: ${KULOFFICE_APPROVALS_SINGLE_OPERATOR:-false}
       KULOFFICE_SUPPLY_ENABLED: ${KULOFFICE_SUPPLY_ENABLED:-false}
       KULOFFICE_SUPPLY_CLEARING_BALANCE: ${KULOFFICE_SUPPLY_CLEARING_BALANCE:-}
       KULOFFICE_SUPPLY_RESERVATION_TTL: 168h

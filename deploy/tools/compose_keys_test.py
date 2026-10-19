@@ -17,7 +17,15 @@ def key_scopes(key_id):
     scopes = re.search(r"^\s*scopes: \[(.*)\]\s*$", block.group(1), re.M)
     if scopes is None:
         raise AssertionError("key " + key_id + " lists no scopes")
-    return [s.strip() for s in scopes.group(1).split(",")]
+    listed = scopes.group(1).strip()
+    # A list from .env (GATEWAY_SERVICE_SCOPES) is checked at its default.
+    variable = re.fullmatch(r"\$\$([A-Z_]+)", listed)
+    if variable is not None:
+        default = re.search(r"^\s*" + variable.group(1) + r": \$\{" + variable.group(1) + r":-(.*)\}\s*$", text, re.M)
+        if default is None:
+            raise AssertionError("key " + key_id + " takes " + variable.group(1) + ", which has no default")
+        listed = default.group(1)
+    return [s.strip() for s in listed.split(",")]
 
 
 class ServiceKeyScopesTest(unittest.TestCase):
