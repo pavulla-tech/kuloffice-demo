@@ -2,7 +2,9 @@
 
 STAFF_EMAIL, STAFF_FIRST_NAME, STAFF_LAST_NAME. A new account gets a temporary
 password (STAFF_PASSWORD, or a random one printed once) that must be changed at
-the first sign-in. SOLANGE_ROLES (comma separated: viewer, developer, admin)
+the first sign-in; with STAFF_PASSWORD_PERMANENT=1 (development stacks'
+seeded admin) STAFF_PASSWORD is the account's password, set again on every
+run. SOLANGE_ROLES (comma separated: viewer, developer, admin)
 grants Solange console roles.
 """
 import json
@@ -17,6 +19,7 @@ KEYCLOAK = os.environ["KEYCLOAK_URL"].rstrip("/")
 REALM = os.environ.get("WORKFORCE_REALM", "workforce")
 CONSOLE_CLIENT = os.environ.get("SOLANGE_CONSOLE_CLIENT_ID", "solange-console")
 EMAIL = os.environ["STAFF_EMAIL"].strip().lower()
+PERMANENT = os.environ.get("STAFF_PASSWORD_PERMANENT") == "1" and bool(os.environ.get("STAFF_PASSWORD"))
 
 
 def call(method, path, token=None, body=None, form=None):
@@ -50,17 +53,26 @@ def main():
     if users:
         uid = users[0]["id"]
         print(f"  ok  {EMAIL} already has an account")
+        if PERMANENT:
+            status, out = call("PUT", f"/admin/realms/{REALM}/users/{uid}/reset-password", t, body={
+                "type": "password", "value": os.environ["STAFF_PASSWORD"], "temporary": False})
+            if status >= 300:
+                sys.exit(f"setting {EMAIL}'s password failed: {status} {out}")
+            print(f"  ok  {EMAIL}'s password set (STAFF_PASSWORD)")
     else:
         password = os.environ.get("STAFF_PASSWORD") or secrets.token_urlsafe(12)
         status, out = call("POST", f"/admin/realms/{REALM}/users", t, body={
             "username": EMAIL, "email": EMAIL, "emailVerified": True, "enabled": True,
             "firstName": os.environ.get("STAFF_FIRST_NAME", ""), "lastName": os.environ.get("STAFF_LAST_NAME", ""),
-            "credentials": [{"type": "password", "value": password, "temporary": True}],
-            "requiredActions": ["UPDATE_PASSWORD"]})
+            "credentials": [{"type": "password", "value": password, "temporary": not PERMANENT}],
+            "requiredActions": [] if PERMANENT else ["UPDATE_PASSWORD"]})
         if status >= 300:
             sys.exit(f"creating {EMAIL} failed: {status} {out}")
         uid = call("GET", f"/admin/realms/{REALM}/users?email={urllib.parse.quote(EMAIL)}&exact=true", t)[1][0]["id"]
-        print(f"  ok  {EMAIL} created; temporary password (changed at first sign-in): {password}")
+        if PERMANENT:
+            print(f"  ok  {EMAIL} created with STAFF_PASSWORD")
+        else:
+            print(f"  ok  {EMAIL} created; temporary password (changed at first sign-in): {password}")
     wanted = [r.strip() for r in os.environ.get("SOLANGE_ROLES", "").split(",") if r.strip()]
     if wanted:
         cid = call("GET", f"/admin/realms/{REALM}/clients?clientId={CONSOLE_CLIENT}", t)[1][0]["id"]

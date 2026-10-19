@@ -494,6 +494,25 @@ gateway_secrets() {
     env_set GATEWAY_AUDIT_SIGNING_KEY "$(head -c 32 /dev/urandom | base64 | tr -d '\n')"
 }
 
+# Development stacks only (DEV_ADMIN_EMAIL and DEV_ADMIN_PASSWORD in .env;
+# empty in production): the developers' admin operator, kept in place after
+# every deploy that can lose it or that brings new permissions. Its workforce
+# account (with that password), the operator, and the Administradores role
+# holding every permission in kuloffice's catalogue (make operator ROLE=ADMIN).
+dev_admin() {
+  local email pw
+  email=$(env_get DEV_ADMIN_EMAIL || true); pw=$(env_get DEV_ADMIN_PASSWORD || true)
+  [[ -n $email && -n $pw ]] || return 0
+  say "development admin: $email, every operator permission"
+  compose --profile tools run --rm -e STAFF_EMAIL="$email" -e STAFF_PASSWORD="$pw" -e STAFF_PASSWORD_PERMANENT=1 \
+    -e STAFF_FIRST_NAME=Developers -e STAFF_LAST_NAME=Pavulla -e KULOFFICE_ROLE=ADMIN -e SOLANGE_ROLES= \
+    tools /tools/operator.sh || say "warning: the development admin was not seeded (make operator to retry)"
+}
+
+# The units whose deploy can lose the admin (keycloak: staff accounts;
+# gateway and kuloffice: kuloffice's operators) or add permissions.
+dev_admin_after() { case $1 in kuloffice|keycloak|gateway) dev_admin ;; esac; }
+
 cmd_deploy() {
   local unit=${1:-} tag=${2:-} cur mode=update db backups="" prev_files
   valid_unit "$unit"; valid_tag "$tag"
@@ -520,6 +539,7 @@ cmd_deploy() {
       hist_add "$unit" "$tag" deploy; log_release deploy "$unit" "$cur" "$tag" ok
       prune_images "$unit"; prune_resets
       say "deployed $unit $tag"
+      dev_admin_after "$unit"
       return 0
     fi
     say "rolling back to ${cur:-nothing}"
@@ -548,6 +568,7 @@ cmd_deploy() {
     for m in $(unit_dependents "$unit"); do log_release wiped "$m" "$(unit_tag "$m")" "$(unit_tag "$m")" ok "by $unit $tag"; done
     prune_images "$unit"; prune_resets
     say "deployed $unit $tag on fresh data"
+    dev_admin_after "$unit"
     return 0
   fi
   say "the reset failed: restoring everything it wiped"
@@ -693,6 +714,7 @@ cmd_provision() {
   say "QR codes: KulPay in Solange, kuloffice's key and webhook"
   ENV_FILE=$ENV_FILE COMPOSE="docker compose --env-file $ENV_FILE" sh scripts/solange-kulpay.sh
   check_unit kuloffice
+  dev_admin
   echo
   echo "Configured. Still by hand (deploy/README.md):"
   [[ -n $(env_get PASSKEY_APP_ORIGINS || true) ]] || echo "  - PASSKEY_APP_ORIGINS is empty: passkeys from the mobile apps are refused"
