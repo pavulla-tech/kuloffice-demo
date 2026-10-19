@@ -150,19 +150,46 @@ registry_login() {
   unset KULPAY_REGISTRY_TOKEN
 }
 
+load_bundled_release() { # unit tag image: private GitHub release asset
+  local unit=$1 tag=$2 image=$3 repo asset tmp
+  case $unit in
+    simulator) repo=pavulla-tech/kulpay-psp-simulator ;;
+    *) die "$image:$tag is not loaded (copy its bundle here and run make load FILE=…)" ;;
+  esac
+  [[ -n ${KULPAY_REGISTRY_TOKEN:-} ]] ||
+    die "$image:$tag is not loaded and this deployment has no release token"
+  asset="kulpay-images-$unit-$tag.tar.gz"
+  tmp=$(mktemp -d)
+  say "downloading the private $unit $tag image bundle"
+  curl -fsSL --retry 3 -H "Authorization: Bearer $KULPAY_REGISTRY_TOKEN" \
+    -H "Accept: application/octet-stream" \
+    -o "$tmp/$asset" "https://github.com/$repo/releases/download/$tag/$asset" ||
+    { rm -rf "$tmp"; die "could not download $repo release $tag"; }
+  curl -fsSL --retry 3 -H "Authorization: Bearer $KULPAY_REGISTRY_TOKEN" \
+    -H "Accept: application/octet-stream" \
+    -o "$tmp/$asset.sha256" "https://github.com/$repo/releases/download/$tag/$asset.sha256" ||
+    { rm -rf "$tmp"; die "could not download the $unit bundle checksum"; }
+  (cd "$tmp" && sha256sum -c "$asset.sha256") ||
+    { rm -rf "$tmp"; die "$unit bundle checksum failed"; }
+  gunzip -c "$tmp/$asset" | docker load > /dev/null
+  rm -rf "$tmp"
+  docker image inspect "$image:$tag" > /dev/null 2>&1 ||
+    die "$unit bundle did not contain $image:$tag"
+  unset KULPAY_REGISTRY_TOKEN
+}
+
 pull_unit() { # unit tag: fails before anything changes
   local name image
-  registry_login
   for name in $(unit_images "$1"); do
     image=$(env_get "${name}_IMAGE")
     # localhost/ images are never on a registry: they arrive in a bundle
-    # (make bundle on the laptop, scp, make load here).
+    # (a private release asset in CI, or make bundle/load by hand).
     if [[ $image == localhost/* ]]; then
-      docker image inspect "$image:$2" > /dev/null 2>&1 ||
-        die "$image:$2 is not loaded (copy its bundle here and run make load FILE=…)"
+      docker image inspect "$image:$2" > /dev/null 2>&1 || load_bundled_release "$1" "$2" "$image"
       say "using the loaded $image:$2"
       continue
     fi
+    registry_login
     say "pulling $image:$2"
     docker ${REGISTRY_CONFIG:+--config "$REGISTRY_CONFIG"} pull -q "$image:$2" > /dev/null ||
       die "could not pull $image:$2 (is the tag on Docker Hub?)"
@@ -270,6 +297,10 @@ check_unit() {
   for svc in $(unit_services "$1"); do
     wait_service "$svc" "$timeout" && probe "$svc" || return 1
   done
+	if [[ $1 == simulator ]]; then
+		say "registering the simulator bindings and callback destinations"
+		compose run --rm gateway-bind || return 1
+	fi
   say "$1 is healthy"
 }
 

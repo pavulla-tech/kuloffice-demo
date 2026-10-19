@@ -103,11 +103,14 @@ provider credentials; see `kuloffice/docs/security-plan.md` for the controls
 planned before production.
 
 The gateway and simulator images never go to a registry (`localhost/…`
-names cannot be pulled). On the laptop, `make bundle` builds both at the tags
-in `.env` into `bundles/kulpay-images-….tar.gz` with its `.sha256`; copy both
-to the server's `deploy/` and run `make load FILE=kulpay-images-….tar.gz`
-there before setting `GATEWAY_TAG` / `SIMULATOR_TAG`. A deploy refuses a
-`localhost/` tag that is not loaded.
+names cannot be pulled). A simulator tag's pipeline publishes its image bundle
+and checksum as private GitHub release assets; the health-checked deploy
+downloads and loads them before switching the service, then reruns
+`gateway-bind` to register bindings and callback destinations. For a manual
+release, `make bundle` builds the selected images at the tags in `.env` into
+`bundles/kulpay-images-….tar.gz` with its `.sha256`; copy both to the server's
+`deploy/` and run `make load FILE=kulpay-images-….tar.gz` there before setting
+`GATEWAY_TAG` / `SIMULATOR_TAG`.
 
 **3. Apache.** For each file in `apache/`: get its certificate (`certbot
 certonly --apache -d <host>`), copy it to `/etc/apache2/sites-available/`,

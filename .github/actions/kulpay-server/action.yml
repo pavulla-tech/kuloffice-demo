@@ -21,7 +21,8 @@ inputs:
     description: >
       A Docker Hub token the server pulls with for this run only (sent on
       stdin, logged in to a throwaway config, deleted when the run ends).
-      Empty: the server pulls anonymously.
+      A bundled private-release unit may instead pass its GitHub token so the
+      server can download that release asset. Empty: no authenticated pull.
     default: ""
   known-hosts:
     description: >

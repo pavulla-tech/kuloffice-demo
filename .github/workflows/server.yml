@@ -14,7 +14,7 @@ on:
       unit:
         description: Only this unit (releases and health)
         type: choice
-        options: [all, kuloffice, web, keycloak, solange, fileserver, kulportal]
+        options: [all, kuloffice, web, keycloak, solange, fileserver, kulportal, gateway, simulator]
         default: all
 
 permissions:
