@@ -172,7 +172,10 @@ services:
     networks: [kulpay]
     environment:
       GATEWAY_API_KEY: ${GATEWAY_API_KEY:?set GATEWAY_API_KEY}
+      GATEWAY_SERVICE_API_KEY: ${GATEWAY_SERVICE_API_KEY:?set GATEWAY_SERVICE_API_KEY}
       GATEWAY_ADMIN_KEY: ${GATEWAY_ADMIN_KEY:?set GATEWAY_ADMIN_KEY}
+      GATEWAY_CHECKER_KEY: ${GATEWAY_CHECKER_KEY:?set GATEWAY_CHECKER_KEY}
+      GATEWAY_ACCOUNT_ID: ${GATEWAY_ACCOUNT_ID:?set GATEWAY_ACCOUNT_ID}
       GATEWAY_ENCRYPTION_KEY: ${GATEWAY_ENCRYPTION_KEY:?set GATEWAY_ENCRYPTION_KEY}
     volumes:
       - gateway-config:/config
@@ -180,9 +183,11 @@ services:
       - /bin/sh
       - -ec
       - |
-        for k in "$$GATEWAY_API_KEY" "$$GATEWAY_ADMIN_KEY"; do
+        for k in "$$GATEWAY_API_KEY" "$$GATEWAY_SERVICE_API_KEY" "$$GATEWAY_ADMIN_KEY" "$$GATEWAY_CHECKER_KEY"; do
           case $$k in *[!0-9a-f]* | "") echo "gateway keys must be hex (openssl rand -hex 32)" >&2; exit 1 ;; esac
         done
+        case "$$GATEWAY_ACCOUNT_ID" in *[!0-9A-Za-z]* | "") echo "GATEWAY_ACCOUNT_ID must be one 27-character alphanumeric tenant id" >&2; exit 1 ;; esac
+        [ "$${#GATEWAY_ACCOUNT_ID}" -eq 27 ] || { echo "GATEWAY_ACCOUNT_ID must be exactly 27 characters" >&2; exit 1; }
         # Live mode refuses to start without a 32-byte key; say so here, plainly.
         if [ "$$(printf %s "$$GATEWAY_ENCRYPTION_KEY" | base64 -d 2>/dev/null | wc -c)" -ne 32 ]; then
           echo "GATEWAY_ENCRYPTION_KEY must be base64 of 32 bytes (openssl rand -base64 32)" >&2; exit 1
@@ -193,14 +198,43 @@ services:
           - id: kuloffice
             secret: "$$GATEWAY_API_KEY"
             mode: live
-            label: "kuloffice top-ups"
-            scopes: [payments:read, payments:write]
+            account_id: "$$GATEWAY_ACCOUNT_ID"
+            label: "kuloffice account integrations"
+            scopes: [payments:read, payments:write, transactions:read, transactions:write, bills:read, bills:write, bills:artifacts, webhooks:manage]
+            rate_per_minute: 600
+          - id: kuloffice-service
+            secret: "$$GATEWAY_SERVICE_API_KEY"
+            mode: live
+            account_id: "$$GATEWAY_ACCOUNT_ID"
+            label: "kuloffice platform integration"
+            # Operator-issued service scopes only, never accounts:write: payment
+            # and payable read-back, fee instructions, merchant webhooks, and
+            # merchant provisioning by account_id (IG-76/IG-67: tenant,
+            # application, application-bound keys, connector sessions).
+            scopes: [service:payments:read, service:settlements:read, service:fees:write, service:webhooks:write, service:accounts:write, service:applications:write, service:keys:write, service:connector-sessions:write]
             rate_per_minute: 600
           - id: operator
             secret: "$$GATEWAY_ADMIN_KEY"
             mode: live
+            account_id: "$$GATEWAY_ACCOUNT_ID"
             label: "connector bindings"
-            scopes: [admin:read, connectors:read, connectors:write]
+            # Maker-checker compares principals (IG-83): this key may prepare
+            # or approve, never both on one request; the other side needs a
+            # different principal.
+            principal: "operator:kit-operator"
+            # accounts:* to bind connectors on a merchant's tenant and propose
+            # arrangements; reconciliation:* for payables and batch confirmations.
+            scopes: [admin:read, admin:write, connectors:read, connectors:write, accounts:read, accounts:write, reconciliation:read, reconciliation:write]
+            rate_per_minute: 60
+          - id: checker
+            secret: "$$GATEWAY_CHECKER_KEY"
+            mode: live
+            account_id: "$$GATEWAY_ACCOUNT_ID"
+            label: "second operator (maker-checker)"
+            # A different principal, so it can approve what the operator key
+            # prepared (settlement destinations, arrangements, confirmations).
+            principal: "operator:kit-checker"
+            scopes: [admin:read, admin:write, accounts:read, accounts:write, reconciliation:read, reconciliation:write]
             rate_per_minute: 60
         EOF
         mv /config/kulpay-payments.yaml.tmp /config/kulpay-payments.yaml
@@ -224,11 +258,26 @@ services:
       KULPAY_DEFAULT_CURRENCY: MZN
       KULPAY_DEFAULT_COUNTRY: MZ
       KULPAY_ACCOUNT_NAME: KulPay
+      KULPAY_ACCOUNT_ID: ${GATEWAY_ACCOUNT_ID:?set GATEWAY_ACCOUNT_ID}
       KULPAY_LOG_FORMAT: json
       KULPAY_OIDC_ENABLED: "false"
+      # IG-83: X-Forwarded-For counts only from these peers. Nothing proxies
+      # the gateway here but the host, through this network's gateway address;
+      # other containers on the network are not trusted.
+      KULPAY_TRUSTED_PROXIES: ${KULPAY_TRUSTED_PROXIES:-127.0.0.0/8,::1/128,${STACK_GATEWAY:-10.250.0.1}}
       # Every rail is a database binding (gateway-bind). Operator-confirmed
       # "manual" payments would be money that never crossed a rail: off.
       KULPAY_CONNECTORS_MANUAL_ENABLED: "false"
+      # Only safe application/binding projections are pushed to KulOffice.
+      # The service-principal token is audience-bound; no connector credential
+      # is ever part of the projection.
+      KULPAY_KULOFFICE_BASE_URL: http://kuloffice:8080
+      KULPAY_KULOFFICE_TOKEN_URL: http://keycloak:8080/realms/${REALM:-kulpay}/protocol/openid-connect/token
+      KULPAY_KULOFFICE_CLIENT_ID: ${GATEWAY_KULOFFICE_CLIENT_ID:-kulpay-gateway}
+      KULPAY_KULOFFICE_CLIENT_SECRET: ${GATEWAY_KULOFFICE_CLIENT_SECRET:?set GATEWAY_KULOFFICE_CLIENT_SECRET}
+      KULPAY_KULOFFICE_AUDIENCE: ${ADMIN_CLIENT_ID:-kulpay-backend}
+      KULPAY_KULOFFICE_TIMEOUT: 30s
+      KULPAY_KULOFFICE_FEE_INSTRUCTION_OVERDUE: 24h
     volumes:
       - gateway-config:/etc/kulpay:ro
     healthcheck:
@@ -308,12 +357,15 @@ services:
       KC_HEALTH_ENABLED: "true"
       KC_BOOTSTRAP_ADMIN_USERNAME: ${KC_ADMIN_USER:-admin}
       KC_BOOTSTRAP_ADMIN_PASSWORD: ${KC_ADMIN_PASSWORD:?set KC_ADMIN_PASSWORD}
-    # The KulPay login theme the mobile app's look comes from. Images built
-    # since CI carry it, and a deploy copies it out of the image it runs into
+    # The mobile app's login theme, kulpay-mobile: its embedded web views get
+    # it (the mobile client's login_theme, set by make init). Every other
+    # client gets the web theme, kulpay, from the provider's JAR; nothing may be
+    # mounted at themes/kulpay, or it would replace the web theme. Images carry
+    # the mobile theme, and a deploy copies it out of the image it runs into
     # state/theme (KEYCLOAK_THEME_DIR), so theme and templates always match.
     # Before that: ./theme/kulpay, copied from intaka by `make theme`.
     volumes:
-      - ${KEYCLOAK_THEME_DIR:-./theme/kulpay}:/opt/keycloak/themes/kulpay:ro
+      - ${KEYCLOAK_THEME_DIR:-./theme/kulpay}:/opt/keycloak/themes/kulpay-mobile:ro
     ports:
       - "127.0.0.1:${KEYCLOAK_PORT:-9180}:8080"
     healthcheck:
@@ -402,6 +454,9 @@ services:
         required: false
     environment:
       KULOFFICE_ENVIRONMENT: ${KULOFFICE_ENVIRONMENT:-production}
+      # Browser origins allowed to call KulOffice (KO-10, owner 2026-10-12):
+      # the web app and kulportal. The mobile app is native and needs none.
+      KULOFFICE_SERVER_HTTP_CORS_ALLOWED_ORIGINS: ${WEB_PUBLIC_URL},${KULPORTAL_PUBLIC_URL:-https://portal.kulpay.pavulla.com}
       KULOFFICE_SERVER_HTTP_PORT: "8080"
       KULOFFICE_SERVER_GRPC_PORT: "50051"
       KULOFFICE_SERVER_GRPC_MAX_RECV_MSG_SIZE: "20971520"
@@ -409,6 +464,15 @@ services:
       KULOFFICE_DATABASE_URL: postgres://kuloffice:${KULOFFICE_DB_PASSWORD}@db:5432/kuloffice?sslmode=disable
       KULOFFICE_ADMIN_EMAIL: ${KULOFFICE_ADMIN_EMAIL:?set KULOFFICE_ADMIN_EMAIL}
       KULOFFICE_ADMIN_PASSWORD: ${KULOFFICE_ADMIN_PASSWORD:?set KULOFFICE_ADMIN_PASSWORD}
+      # HTTP Basic for the env admin (IG-84): bootstrap and the reviewer seed
+      # need it. Set KULOFFICE_ADMIN_BASIC_ENABLED=false in .env once they ran.
+      # Outside development the password must be at least 20 characters
+      # (bin/kulpay generates one into .env when it is empty).
+      KULOFFICE_ADMIN_BASIC_ENABLED: ${KULOFFICE_ADMIN_BASIC_ENABLED:-true}
+      # The issuer the Gateway's client and instruction workers' tokens must
+      # come from (IG-84): the kulpay realm. Production does not start without
+      # it while a Gateway client or worker is configured.
+      KULOFFICE_AUTH_SERVICE_ISSUER: ${KULOFFICE_AUTH_SERVICE_ISSUER:-${KEYCLOAK_PUBLIC_URL}/realms/${REALM:-kulpay}}
       # The admin API, for the PIN at the end of onboarding. Tokens are checked
       # against the public issuer, which kuloffice fetches through Apache.
       KULOFFICE_KEYCLOAK_BASE_URL: http://keycloak:8080
@@ -416,6 +480,10 @@ services:
       KULOFFICE_KEYCLOAK_CLIENT_ID: ${ADMIN_CLIENT_ID:-kulpay-backend}
       KULOFFICE_KEYCLOAK_CLIENT_SECRET: ${ADMIN_CLIENT_SECRET:?set ADMIN_CLIENT_SECRET}
       KULOFFICE_KEYCLOAK_ONBOARDING_ROLE: ${ONBOARDING_ROLE:-onboarding_pending}
+      # Staff tokens from this realm never become customers; an operator added
+      # in the portal is bound at first sign-in by their verified email.
+      KULOFFICE_AUTH_WORKFORCE_ISSUERS: ${KEYCLOAK_PUBLIC_URL}/realms/${WORKFORCE_REALM:-workforce}
+      # No defaults in KulOffice any more (IG-84): from .env, or SMS is off.
       KULOFFICE_SMS_BASE_URL: ${OLA_SMS_BASE_URL}
       KULOFFICE_SMS_API_KEY: ${OLA_SMS_API_KEY}
       KULOFFICE_SMS_PROVIDER_ID: ${OLA_SMS_PROVIDER_ID}
@@ -436,7 +504,9 @@ services:
       KULOFFICE_ADAPTER_BLNK_BOOTSTRAP_ENABLED: "true"
       # For now, selected financial capabilities run in the API container.
       # The durable instruction lease still prevents a second executor.
-      KULOFFICE_EMBEDDED_FINANCIAL_WORKER: '{"enabled":true,"capabilities":["product_balance:query","product_transfer:create","fee:collect"],"max_capacity":1}'
+      # Overridable from .env only to run an older kuloffice (one that refuses
+      # the newer capabilities) for a moment, e.g. during a gateway reset.
+      KULOFFICE_EMBEDDED_FINANCIAL_WORKER: ${KULOFFICE_EMBEDDED_FINANCIAL_WORKER:-{"enabled":true,"capabilities":["product_balance:query","product_transfer:create","fee:collect","transaction_fee:collect","bill_payment:create","checkout_balance:reserve","checkout_balance:capture","checkout_balance:void","checkout_balance:refund"],"max_capacity":2}}
       # Top-ups collect through the stack's own gateway. A wallet charge waits
       # for the customer (the simulator holds it up to 60s), so the client
       # timeout outlasts it; a timeout is an unknown outcome, re-sent with the
@@ -444,9 +514,51 @@ services:
       KULOFFICE_TOPUP_ENABLED: "true"
       KULOFFICE_TOPUP_GATEWAY: kulpay-gateway
       KULOFFICE_TOPUP_GATEWAY_URL: http://gateway:9090
+      KULOFFICE_TOPUP_GATEWAY_API_URL: http://gateway:9091/v1
       KULOFFICE_TOPUP_GATEWAY_API_KEY: ${GATEWAY_API_KEY}
       KULOFFICE_TOPUP_GATEWAY_TIMEOUT: 120s
       KULOFFICE_TOPUP_MAX_CAPACITY: "2"
+      # Switch integrations on one at a time after their provider, balance and
+      # webhook pre-flight checks. `make gateway-kuloffice` writes the two
+      # signing secrets into the ignored .env.
+      KULOFFICE_INCOMING_TRANSFERS_ENABLED: ${KULOFFICE_INCOMING_TRANSFERS_ENABLED:-false}
+      KULOFFICE_INCOMING_TRANSFERS_GATEWAY_ACCOUNT_ID: ${GATEWAY_ACCOUNT_ID}
+      KULOFFICE_INCOMING_TRANSFERS_WEBHOOK_SECRETS: ${KULOFFICE_INCOMING_TRANSFERS_WEBHOOK_SECRETS:-}
+      KULOFFICE_INCOMING_TRANSFERS_POLL_INTERVAL: 5m
+      KULOFFICE_INCOMING_TRANSFERS_MAX_CAPACITY: "2"
+      KULOFFICE_SUPPLY_ENABLED: ${KULOFFICE_SUPPLY_ENABLED:-false}
+      KULOFFICE_SUPPLY_CLEARING_BALANCE: ${KULOFFICE_SUPPLY_CLEARING_BALANCE:-}
+      KULOFFICE_SUPPLY_RESERVATION_TTL: 168h
+      KULOFFICE_SUPPLY_FULFILMENT_WINDOW: 72h
+      KULOFFICE_SUPPLY_MAX_CAPACITY: "2"
+      KULOFFICE_SUPPLY_CATALOG_CACHE_TTL: 60s
+      KULOFFICE_CHECKOUT_PROVIDER_GATEWAY_CLIENT_ID: ${GATEWAY_KULOFFICE_CLIENT_ID:-kulpay-gateway}
+      KULOFFICE_CHECKOUT_PROVIDER_APPROVAL_URL: ${WEB_PUBLIC_URL}/pagar/{id}
+      # IG-45: signed checkout_authorization.updated wake-ups to each
+      # kulpay_balance binding's callback on the Gateway's public listener.
+      # Every binding's signing_secret is its mode's secret below; a mode
+      # without one sends nothing and the Gateway keeps polling.
+      KULOFFICE_CHECKOUT_PROVIDER_GATEWAY_CALLBACK_URL: http://gateway:9090
+      KULOFFICE_CHECKOUT_PROVIDER_WAKEUP_SIGNING_SECRETS: ${KULOFFICE_CHECKOUT_PROVIDER_WAKEUP_SIGNING_SECRETS:-}
+      KULOFFICE_CHECKOUT_PROVIDER_WAKEUP_TEST_SIGNING_SECRETS: ${KULOFFICE_CHECKOUT_PROVIDER_WAKEUP_TEST_SIGNING_SECRETS:-}
+      KULOFFICE_PAYMENT_ACCEPTANCE_ENABLED: ${KULOFFICE_PAYMENT_ACCEPTANCE_ENABLED:-false}
+      KULOFFICE_PAYMENT_ACCEPTANCE_GATEWAY_URL: http://gateway:9091/v1
+      KULOFFICE_PAYMENT_ACCEPTANCE_GATEWAY_API_KEY: ${GATEWAY_SERVICE_API_KEY}
+      KULOFFICE_PAYMENT_ACCEPTANCE_WEBHOOK_SECRETS: ${KULOFFICE_PAYMENT_ACCEPTANCE_WEBHOOK_SECRETS:-}
+      KULOFFICE_PAYMENT_ACCEPTANCE_GATEWAY_TIMEOUT: 30s
+      KULOFFICE_PAYMENT_ACCEPTANCE_PROCESS_INTERVAL: 5s
+      # Gateway provisioning of Payment Acceptance applications (IG-67): the
+      # service key above holds its four scopes. The seal key (bin/kulpay
+      # generates it into .env) seals keys' one-time reveals.
+      KULOFFICE_PAYMENT_ACCEPTANCE_PROVISIONING_ENABLED: ${KULOFFICE_PAYMENT_ACCEPTANCE_PROVISIONING_ENABLED:-false}
+      KULOFFICE_PAYMENT_ACCEPTANCE_SECRET_SEAL_KEY: ${KULOFFICE_PAYMENT_ACCEPTANCE_SECRET_SEAL_KEY:-}
+      KULOFFICE_RECONCILIATION_ENABLED: ${KULOFFICE_RECONCILIATION_ENABLED:-false}
+      KULOFFICE_RECONCILIATION_INTERVAL: 1h
+      KULOFFICE_RECONCILIATION_WINDOW: 48h
+      KULOFFICE_RECONCILIATION_GRACE: 1h
+      KULOFFICE_RECONCILIATION_BATCH_SIZE: "100"
+      KULOFFICE_SANDBOX_LEDGER_MAX_CREDIT_MINOR: "1000000"
+      KULOFFICE_SANDBOX_LEDGER_MAX_BALANCE_MINOR: "10000000"
       # QR codes through Solange. Off until the key is set: `make solange-kulpay`
       # issues it (and the webhook secret) into .env.
       KULOFFICE_SOLANGE_BASE_URL: http://solange:8090
@@ -601,3 +713,5 @@ services:
       # Keycloak treats private addresses as local (sslRequired=external).
       KEYCLOAK_URL: http://keycloak:8080
       KULOFFICE_URL: http://kuloffice:8080
+      GATEWAY_MANAGEMENT_URL: http://gateway:9091/v1
+      GATEWAY_KULOFFICE_EVENT_URL: http://kuloffice:8080/v1/integrations/kulpay-gateway/events

@@ -9,7 +9,8 @@
 #   kulpay health   [unit]                       check running units
 #   kulpay backup   <database>                   a backup now
 #   kulpay restore  <database> <file> --yes      replace a database
-#   kulpay provision                             init, then QR codes (both idempotent)
+#   kulpay provision                             init, Gateway events, then QR codes (idempotent)
+#   kulpay secrets                               generate the missing generated values into .env
 #
 # Options anywhere: --actor NAME (who asked; CI passes the GitHub user).
 #
@@ -180,18 +181,20 @@ prune_images() {
   done
 }
 
-# The login theme Keycloak mounts, copied out of the image it runs.
+# The mobile login theme Keycloak mounts (kulpay-mobile), copied out of the
+# image it runs. Images from before it had its own name carry it as
+# themes/kulpay, which then also hides the web theme: deploy a newer one.
 theme_from_image() {
-  local image cid dir=$STATE/theme
+  local image cid dir=$STATE/theme name=kulpay-mobile
   image=$(env_get KEYCLOAK_IMAGE):$1
-  mkdir -p "$dir"; rm -rf "$dir/kulpay.new"
+  mkdir -p "$dir"; rm -rf "$dir/$name.new"
   cid=$(docker create "$image")
-  if docker cp "$cid:/opt/keycloak/themes/kulpay" "$dir/kulpay.new" 2> /dev/null; then
-    chmod -R a+rX "$dir/kulpay.new"
-    rm -rf "$dir/kulpay.prev"
-    [[ -d $dir/kulpay ]] && mv "$dir/kulpay" "$dir/kulpay.prev"
-    mv "$dir/kulpay.new" "$dir/kulpay"
-    env_set KEYCLOAK_THEME_DIR ./state/theme/kulpay
+  if docker cp "$cid:/opt/keycloak/themes/$name" "$dir/$name.new" 2> /dev/null; then
+    chmod -R a+rX "$dir/$name.new"
+    rm -rf "$dir/$name.prev"
+    [[ -d $dir/$name ]] && mv "$dir/$name" "$dir/$name.prev"
+    mv "$dir/$name.new" "$dir/$name"
+    env_set KEYCLOAK_THEME_DIR "./state/theme/$name"
     say "login theme: from $image"
   else
     say "login theme: $image has none; keeping $(env_get KEYCLOAK_THEME_DIR || true)"
@@ -446,8 +449,44 @@ portal_setup() {
     [[ -n $(env_get "$name" || true) ]] || env_set "$name" "$(head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n')"
   done
   say "the portal's client in the workforce realm"
-  compose --profile tools run --rm tools sh -c \
+  compose --profile tools run --rm tools -c \
     'KC_BOOTSTRAP_ADMIN_USERNAME="${KC_ADMIN_USER:-admin}" KC_BOOTSTRAP_ADMIN_PASSWORD="$KC_ADMIN_PASSWORD" PORTAL_URL="$KULPORTAL_PUBLIC_URL" PORTAL_CLIENT_SECRET="$KULPORTAL_CLIENT_SECRET" python3 /stack/add_portal_client.py'
+}
+
+# KulOffice's generated secrets, made once into .env (not shown): the
+# env-admin password (at least 20 characters outside development, IG-84) and
+# the provisioning seal key (base64 of 32 bytes, IG-67) and the checkout
+# wake-up signing secrets (IG-45).
+kuloffice_secrets() {
+  local pw
+  [[ -n $(env_get KULOFFICE_ADMIN_PASSWORD || true) ]] ||
+    env_set KULOFFICE_ADMIN_PASSWORD "$(head -c 24 /dev/urandom | od -An -tx1 | tr -d ' \n')"
+  pw=$(env_get KULOFFICE_ADMIN_PASSWORD || true)
+  if (( ${#pw} < 20 )) && [[ $(env_get KULOFFICE_ENVIRONMENT || true) != development ]]; then
+    say "warning: KULOFFICE_ADMIN_PASSWORD is shorter than 20 characters; kuloffice will refuse it"
+  fi
+  [[ -n $(env_get KULOFFICE_PAYMENT_ACCEPTANCE_SECRET_SEAL_KEY || true) ]] ||
+    env_set KULOFFICE_PAYMENT_ACCEPTANCE_SECRET_SEAL_KEY "$(head -c 32 /dev/urandom | base64 | tr -d '\n')"
+  local k
+  for k in KULOFFICE_CHECKOUT_PROVIDER_WAKEUP_SIGNING_SECRETS KULOFFICE_CHECKOUT_PROVIDER_WAKEUP_TEST_SIGNING_SECRETS; do
+    [[ -n $(env_get "$k" || true) ]] ||
+      env_set "$k" "$(head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n')"
+  done
+}
+
+# The Gateway integration's generated values, made once into .env (not
+# shown) on every deploy, because compose needs them for every unit: KulOffice's
+# Gateway tenant (27 alphanumerics, fixed from then on), its platform service
+# key, the Keycloak secret of the Gateway's client and the second operator
+# (checker) key.
+gateway_secrets() {
+  [[ -n $(env_get GATEWAY_ACCOUNT_ID || true) ]] ||
+    env_set GATEWAY_ACCOUNT_ID "$(head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n' | cut -c1-27)"
+  local k
+  for k in GATEWAY_SERVICE_API_KEY GATEWAY_KULOFFICE_CLIENT_SECRET GATEWAY_CHECKER_KEY; do
+    [[ -n $(env_get "$k" || true) ]] ||
+      env_set "$k" "$(head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n')"
+  done
 }
 
 cmd_deploy() {
@@ -462,6 +501,7 @@ cmd_deploy() {
   fi
   say "deploy $unit: ${cur:-nothing} → $tag ($mode)"
   [[ $unit == kulportal ]] && portal_setup
+  gateway_secrets; kuloffice_secrets
   pull_unit "$unit" "$tag"
 
   if [[ $mode == update ]]; then
@@ -640,8 +680,11 @@ cmd_health() {
 # each step only if missing). What a person must still do is listed after.
 cmd_provision() {
   lock
+  gateway_secrets; kuloffice_secrets
   say "init: realms, clients, license, identity providers"
   compose --profile tools run --rm tools /tools/init.sh
+  say "Gateway: incoming-transfer endpoint and platform payment-event sink"
+  ENV_FILE=$ENV_FILE COMPOSE="docker compose --env-file $ENV_FILE" sh scripts/gateway-kuloffice.sh
   say "QR codes: KulPay in Solange, kuloffice's key and webhook"
   ENV_FILE=$ENV_FILE COMPOSE="docker compose --env-file $ENV_FILE" sh scripts/solange-kulpay.sh
   check_unit kuloffice
@@ -685,5 +728,6 @@ case $command in
   backup) cmd_backup "$@" ;;
   restore) cmd_restore "$@" ;;
   provision) cmd_provision ;;
+  secrets) gateway_secrets; kuloffice_secrets; say "generated values present in $ENV_FILE (not shown)" ;;
   *) sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'; [[ $command == help ]] ;;
 esac

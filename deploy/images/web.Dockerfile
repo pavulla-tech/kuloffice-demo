@@ -11,6 +11,8 @@ COPY next.config.ts tsconfig.json postcss.config.mjs vitest.config.mts vitest.se
 COPY messages ./messages
 COPY public ./public
 COPY src ./src
+# Helpers the tests import (request ids, server-only stub).
+COPY test ./test
 RUN npm run build
 FROM node:22-alpine3.20
 WORKDIR /app

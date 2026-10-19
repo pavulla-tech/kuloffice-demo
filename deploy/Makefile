@@ -6,14 +6,14 @@
 .PHONY: help setup sync-env clean-env-backups config check-images \
         images push bundle load theme license \
         start start-portal stop restart logs ps update clean reset-blnk \
-        init operator solange-kulpay \
+        init operator solange-kulpay gateway-kuloffice \
         deploy rollback releases status health backup restore
 
 ENV_FILE ?= .env
 ENV_EXAMPLE ?= .env.example
 COMPOSE = ENV_FILE=$(ENV_FILE) docker compose --env-file $(ENV_FILE)
 
-# A service, for the targets that take one: make logs S=kuloffice
+# A service, for the targets that take one: make logs S=kuloffice (F=0 to print and exit)
 S ?=
 
 # Every image `make images` builds, by its .env prefix.
@@ -54,7 +54,9 @@ help:
 	@echo ""
 	@echo "Provisioning (on the server, after start)"
 	@echo "  make init               realms, clients, kuloffice license and identity providers"
-	@echo "  make operator EMAIL=… FIRST=… LAST=… [ROLE=Revisores] [SOLANGE=viewer,developer]"
+	@echo "  make gateway-kuloffice  Gateway event endpoints and signing secrets for KulOffice"
+	@echo "  make operator EMAIL=… FIRST=… LAST=… [ROLE=Revisores|ADMIN] [SOLANGE=viewer,developer]"
+	@echo "                          ROLE=ADMIN: the Administradores role (every kuloffice permission)"
 	@echo "                          a staff account; ROLE= (empty) for Solange only"
 	@echo "  make solange-kulpay     KulPay's app in Solange, kuloffice's key and webhook (into .env)"
 
@@ -179,8 +181,13 @@ stop:
 restart:
 	$(COMPOSE) up -d --force-recreate $(S)
 
+# Follows by default; F=0 prints and exits (for piping into grep), N lines
+# (default 200), SINCE e.g. 15m.
+F ?= 1
+N ?= 200
+SINCE ?=
 logs:
-	$(COMPOSE) --profile portal logs -f --tail=200 $(S)
+	$(COMPOSE) --profile portal logs $(if $(filter 1,$(F)),-f) --tail=$(N) $(if $(SINCE),--since $(SINCE)) $(S)
 
 ps:
 	$(COMPOSE) --profile portal ps -a
@@ -206,10 +213,31 @@ reset-blnk:
 init:
 	$(COMPOSE) --profile tools run --rm tools /tools/init.sh
 
+# The account webhook (incoming transfers) and the platform event sink
+# (payment acceptance) share KulOffice's signed-event intake but have separate
+# secrets. Safe to repeat; secrets are rotated only when .env lost its copy.
+# The generated values bin/kulpay keeps in .env (Gateway keys and secrets,
+# KulOffice's admin password, seal key and wake-up secrets), made if missing.
+secrets:
+	@$(KULPAY) secrets
+
+# A merchant's bindings on the Gateway, from its Payment Acceptance
+# application in KulOffice: APP=pacapp_…. Always KulPay balance (test
+# applications in test mode, live ones in live mode); for a live application
+# also M-Pesa at the PSP simulator (dev servers only). Safe to repeat: it
+# updates the bindings.
+merchant-bindings:
+	@[ -n "$(APP)" ] || { echo "usage: make merchant-bindings APP=pacapp_…" >&2; exit 1; }
+	@ENV_FILE=$(ENV_FILE) COMPOSE="docker compose --env-file $(ENV_FILE)" sh scripts/merchant-bindings.sh "$(APP)"
+
+gateway-kuloffice:
+	@ENV_FILE=$(ENV_FILE) COMPOSE="docker compose --env-file $(ENV_FILE)" sh scripts/gateway-kuloffice.sh
+
+# ROLE=ADMIN: an admin, holding every permission in kuloffice's catalogue.
 ROLE ?= Revisores
 SOLANGE ?=
 operator:
-	@[ -n "$(EMAIL)" ] || { echo "usage: make operator EMAIL=… FIRST=… LAST=… [ROLE=Revisores] [SOLANGE=viewer]" >&2; exit 1; }
+	@[ -n "$(EMAIL)" ] || { echo "usage: make operator EMAIL=… FIRST=… LAST=… [ROLE=Revisores|ADMIN] [SOLANGE=viewer]" >&2; exit 1; }
 	$(COMPOSE) --profile tools run --rm -e STAFF_EMAIL="$(EMAIL)" -e STAFF_FIRST_NAME="$(FIRST)" -e STAFF_LAST_NAME="$(LAST)" \
 		-e KULOFFICE_ROLE="$(ROLE)" -e SOLANGE_ROLES="$(SOLANGE)" tools /tools/operator.sh
 

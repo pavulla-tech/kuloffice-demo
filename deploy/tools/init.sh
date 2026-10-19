@@ -34,6 +34,13 @@ python3 /setup/update_existing_realm.py
 # Web apps on developers' laptops (the local stack's KEYCLOAK=server); unset
 # means the local stack's web app, set empty means none.
 DEV_WEB_ORIGINS="${DEV_WEB_ORIGINS-http://localhost:3000}" python3 /tools/dev_origins.py
+# The mobile app's embedded web views get its own login screens (kulpay-mobile);
+# every other client keeps the web theme.
+python3 /tools/client_themes.py
+# The Gateway is a confidential service principal, separate from customers,
+# staff and instruction workers. It may call only KulOffice's allowlisted
+# checkout/projection methods; the server enforces the method boundary.
+python3 /tools/gateway_client.py
 
 echo "== workforce realm '${WORKFORCE_REALM:-workforce}'"
 # No demo reviewer: staff are added with `make operator`.

@@ -12,7 +12,7 @@ The whole of KulPay on one server, in one compose stack:
 | `solange-console` | https://console.qr.kulpay.pavulla.com | 9680 | Solange's staff console |
 | `kulportal` | https://portal.kulpay.pavulla.com | 9780 | Off until ready (`make start-portal`) |
 | `blnk-server`, `blnk-worker` | — | — | Pinned self-hosted BLNK API and its queue processor; internal only |
-| `gateway` | — | — | KulPay's own payments gateway (katembe-payments), live mode; kuloffice collects top-ups through it. Internal only |
+| `gateway` | — | — | KulPay's own payments gateway (katembe-payments), live mode; KulOffice uses its public root for top-ups and its management `/v1` API for transfers, supply, Payment Acceptance and reconciliation. Internal only |
 | `simulator` | https://sim.kulpay.pavulla.com (password) | 9880 | Development only: the PSP simulator the gateway's live M-Pesa, e-Mola and card bindings point at, and its customer page |
 | `db` | — | — | Postgres 17: one isolated database and role each for kuloffice, Keycloak, Solange, BLNK, the gateway |
 | `blnk-redis`, `blnk-typesense` | — | — | BLNK's durable queue and rebuildable search projection; internal only |
@@ -142,12 +142,20 @@ purpose.
 make operator EMAIL=ana@pavulla.com FIRST=Ana LAST=Macuacua                 # a KYC reviewer
 make operator EMAIL=rui@pavulla.com FIRST=Rui LAST=Lopes SOLANGE=developer   # also in Solange
 make operator EMAIL=eva@pavulla.com FIRST=Eva LAST=Sitoe ROLE= SOLANGE=viewer # Solange only
+make operator EMAIL=ze@pavulla.com FIRST=Zé LAST=Tembe ROLE=ADMIN SOLANGE=admin  # an admin, everywhere
 ```
 
 - **The account:** a workforce account with a temporary password (printed
   once, changed at the first sign-in).
 - **`ROLE`** (default `Revisores`, KYC review permissions): a kuloffice
-  operator bound to the account, holding that role.
+  operator bound to the account, holding that role and the Conta Pagamento
+  back-office role (`Produtos (local)`).
+- **`ROLE=ADMIN`:** an admin instead. The operator holds `Administradores`:
+  every permission in kuloffice's catalogue, read from
+  `GET /v1/operator-permissions` and re-applied on every run, so permissions
+  added later reach admins once `make operator … ROLE=ADMIN` runs again.
+  Creating or editing roles stays with the env-admin; an admin can grant only
+  roles whose permissions they hold, never to themselves.
 - **`SOLANGE`:** console roles, any of `viewer`, `developer`, `admin`.
 
 **6. QR codes** (kuloffice through Solange):
@@ -299,6 +307,67 @@ make deploy U=kuloffice T=<tag>      # or: the tag in .env, then make update
 `make restart S=kuloffice` recreates one service: a plain `docker restart`
 keeps the old environment. After a change to the realm scripts or `.env`'s
 realm settings, `make init` applies it.
+
+### KulOffice and the payments Gateway
+
+The integration uses three independent Gateway keys. `GATEWAY_API_KEY` belongs
+to KulOffice's own Gateway account and can create/read payments, incoming
+transfers, bill payments and its own webhook. `GATEWAY_SERVICE_API_KEY` is the
+operator-issued cross-account service key used only for authenticated payment
+and payable read-back, fee instructions, merchant webhook provisioning and
+merchant provisioning (IG-67: the merchant's tenant, Payment Acceptance
+applications, application-bound keys and connector sessions, through the
+narrow `service:accounts:write`, `service:applications:write`,
+`service:keys:write` and `service:connector-sessions:write` scopes). It never
+holds `accounts:write`. Turn provisioning on with
+`KULOFFICE_PAYMENT_ACCEPTANCE_PROVISIONING_ENABLED=true` once the Gateway serves
+those scopes; `bin/kulpay` generates its seal key
+(`KULOFFICE_PAYMENT_ACCEPTANCE_SECRET_SEAL_KEY`) into `.env` when empty.
+
+Since IG-84 KulOffice needs, besides the above: `KULOFFICE_ADMIN_BASIC_ENABLED`
+(true by default here, for provisioning's bootstrap; set it to `false` in `.env`
+and `make restart S=kuloffice` once provisioning ran), an admin password of at
+least 20 characters (`bin/kulpay` generates one when `KULOFFICE_ADMIN_PASSWORD`
+is empty), `KULOFFICE_AUTH_SERVICE_ISSUER` (default: the `REALM` realm under
+`KEYCLOAK_PUBLIC_URL`; production refuses to start without it while the
+Gateway client or a worker is configured), and the `OLA_SMS_*` values: KulOffice
+has no SMS defaults any more, so SMS is off without them.
+
+Since Gateway IG-83, the gateway believes `X-Forwarded-For` only from
+`KULPAY_TRUSTED_PROXIES` (default: loopback and `STACK_GATEWAY`), and
+maker-checker compares principals: the `operator` key carries
+`principal: operator:kit-operator`, so it can prepare or approve a request but
+never both; the other side needs a different principal.
+`GATEWAY_ADMIN_KEY` configures connector bindings and the one platform event
+sink. Do not combine them: their separation is part of the tenant boundary.
+
+Before the fresh Gateway database is first started, set a stable,
+27-character alphanumeric `GATEWAY_ACCOUNT_ID`. The generated Gateway YAML
+binds all three keys to that tenant. Also set a distinct
+`GATEWAY_KULOFFICE_CLIENT_SECRET`; `make init` creates or updates the
+`kulpay-gateway` Keycloak service client and gives its tokens only KulOffice's
+API audience.
+
+After Gateway, Keycloak and KulOffice are running, provision signed event
+delivery:
+
+```bash
+make gateway-kuloffice
+```
+
+The command idempotently creates KulOffice's account webhook for
+`incoming_transfer.*` and the platform `payment.*` event sink. Their one-time
+signing secrets are written to the ignored `.env` without being printed, then
+KulOffice is recreated. If an endpoint exists but `.env` lost its secret, the
+command rotates that secret with a 24-hour grace period. The deployment tool's
+`bin/kulpay provision` action includes this step.
+
+Incoming transfers, supply, Payment Acceptance and reconciliation remain off
+by default. Enable them in that order after each smoke test. Supply must not be
+enabled until `KULOFFICE_SUPPLY_CLEARING_BALANCE` names the real BLNK clearing
+balance. The two Gateway bases are deliberately different: top-up charge calls
+use the public root `http://gateway:9090`, while every `/v1` account/service
+call uses `http://gateway:9091/v1`.
 
 ## Day to day
 
