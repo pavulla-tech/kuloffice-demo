@@ -1,0 +1,41 @@
+{
+  "_about": "Development stacks' notification texts (pt): proposed and approved by tools/dev_rules.py when an event has no approved text. Operators replace them in the back office; a text in force is never overwritten. Variables are {name}, as KulOffice's events list them.",
+  "language": "pt",
+  "texts": [
+    {"event": "claim_send.waiting", "channel": "sms", "text": "KulPay: {sender_name} enviou-lhe {amount}. Crie a sua conta KulPay com este numero ate {deadline} para receber."},
+    {"event": "claim_send.claimed", "channel": "sms", "text": "KulPay: os {amount} que enviou para {phone} foram recebidos."},
+    {"event": "claim_send.expired", "channel": "sms", "text": "KulPay: ninguem recebeu os {amount} que enviou para {phone}. O valor voltou ao seu saldo."},
+    {"event": "claim_send.unfulfilled", "channel": "sms", "text": "KulPay: {sender_name} tentou enviar-lhe {amount}, mas o valor excede os limites da sua conta."},
+    {"event": "claim_send.returned", "channel": "sms", "text": "KulPay: os {amount} para {phone} excederam os limites da conta de destino. O valor voltou ao seu saldo."},
+
+    {"event": "orientu.request_sms", "channel": "sms", "text": "KulPay: {requester} pede-lhe {amount} ({reason}). Pague na app KulPay ou num agente com a referencia {reference}. {link}"},
+
+    {"event": "orientu.request_received", "channel": "inbox", "text": "{requester} pede-lhe {amount}: {reason}. Responda até {deadline}."},
+    {"event": "orientu.answer_declined", "channel": "inbox", "text": "Uma pessoa recusou o seu pedido \"{reason}\"."},
+    {"event": "orientu.answer_scheduled", "channel": "inbox", "text": "Uma pessoa vai pagar {amount} para \"{reason}\" a {when}."},
+    {"event": "orientu.answer_when_balance", "channel": "inbox", "text": "Uma pessoa vai pagar {amount} para \"{reason}\" quando tiver saldo."},
+    {"event": "orientu.contribution_received", "channel": "inbox", "text": "Recebeu {amount} para \"{reason}\". Total: {total} de {target}."},
+    {"event": "orientu.request_reached", "channel": "inbox", "text": "O seu pedido \"{reason}\" atingiu a meta: {total}."},
+    {"event": "orientu.request_reached_pending", "channel": "inbox", "text": "O pedido \"{reason}\" já atingiu a meta. Já não precisa de pagar."},
+    {"event": "orientu.request_expired", "channel": "inbox", "text": "O prazo do pedido \"{reason}\" terminou. Recebeu {total} de {target}."},
+    {"event": "orientu.request_cancelled", "channel": "inbox", "text": "O pedido \"{reason}\" foi cancelado. Não será feito nenhum pagamento."},
+    {"event": "orientu.deadline_near_requester", "channel": "inbox", "text": "Faltam {hours} horas para o fim do pedido \"{reason}\". Recebeu {total} de {target}."},
+    {"event": "orientu.deadline_near_recipient", "channel": "inbox", "text": "O pedido \"{reason}\" ({reference}) termina a {deadline}. Ainda pode responder."},
+    {"event": "orientu.commitment_reminder", "channel": "inbox", "text": "Lembrete: a {when} será pago {amount} para \"{reason}\"."},
+    {"event": "orientu.commitment_failed_payer", "channel": "inbox", "text": "Não foi possível pagar {amount} para \"{reason}\". Verifique o seu saldo."},
+    {"event": "orientu.commitment_failed_requester", "channel": "inbox", "text": "Um pagamento de {amount} prometido para \"{reason}\" não foi feito."},
+
+    {"event": "orientu.contribution_held", "channel": "inbox", "text": "Recebeu {amount} para \"{reason}\", guardados até ao fim da causa. Total: {total} de {target}."},
+    {"event": "orientu.cause_more_info", "channel": "inbox", "text": "A revisão da causa \"{reason}\" precisa de mais informação: {note}"},
+    {"event": "orientu.cause_rejected", "channel": "inbox", "text": "A causa \"{reason}\" não foi aprovada. {note}"},
+    {"event": "orientu.cause_published", "channel": "inbox", "text": "A causa \"{reason}\" foi publicada. Referência: {reference}."},
+    {"event": "orientu.cause_suspended", "channel": "inbox", "text": "A causa \"{reason}\" foi suspensa. Não recebe contribuições por agora."},
+    {"event": "orientu.cause_reinstated", "channel": "inbox", "text": "A causa \"{reason}\" está publicada de novo."},
+    {"event": "orientu.cause_closed", "channel": "inbox", "text": "A causa \"{reason}\" foi encerrada. {note}"},
+    {"event": "orientu.cause_refunded", "channel": "inbox", "text": "As contribuições para \"{reason}\" estão a ser devolvidas."},
+    {"event": "orientu.funds_released", "channel": "inbox", "text": "{amount} da causa \"{reason}\" estão agora no seu saldo."},
+    {"event": "orientu.contribution_refunded", "channel": "inbox", "text": "A sua contribuição de {amount} para \"{reason}\" foi devolvida."},
+    {"event": "orientu.funds_held", "channel": "inbox", "text": "{amount} do seu saldo ficam indisponíveis até {when}."},
+    {"event": "orientu.funds_hold_released", "channel": "inbox", "text": "{amount} do seu saldo estão disponíveis de novo."}
+  ]
+}

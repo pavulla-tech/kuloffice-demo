@@ -503,11 +503,36 @@ gateway_secrets() {
 dev_admin() {
   local email pw
   email=$(env_get DEV_ADMIN_EMAIL || true); pw=$(env_get DEV_ADMIN_PASSWORD || true)
+  # Quoted in .env ('…' or "…", for a # in it): the value without its quotes.
+  pw=${pw#[\'\"]}; pw=${pw%[\'\"]}
   [[ -n $email && -n $pw ]] || return 0
   say "development admin: $email, every operator permission"
   compose --profile tools run --rm -e STAFF_EMAIL="$email" -e STAFF_PASSWORD="$pw" -e STAFF_PASSWORD_PERMANENT=1 \
     -e STAFF_FIRST_NAME=Developers -e STAFF_LAST_NAME=Pavulla -e KULOFFICE_ROLE=ADMIN -e SOLANGE_ROLES=admin \
-    tools /tools/operator.sh || say "warning: the development admin was not seeded (make operator to retry)"
+    tools /tools/operator.sh || { say "warning: the development admin was not seeded (make operator to retry)"; return 0; }
+  dev_claim_sends
+  say "development texts: the products' notification texts, where none is approved"
+  compose --profile tools run --rm --entrypoint python3 -e DEV_ADMIN_EMAIL="$email" -e DEV_ADMIN_PASSWORD="$pw" \
+    -e WORKFORCE_ISSUER="$(env_get KEYCLOAK_PUBLIC_URL)/realms/$(env_get WORKFORCE_REALM || echo workforce)" \
+    tools /tools/dev_rules.py || say "warning: the development texts were not seeded (bin/kulpay provision to retry)"
+}
+
+# Development stacks: sends to numbers without an account, on. The hold
+# balance is left to KulOffice's BLNK bootstrap (v0.1.8-alpha09 and later;
+# an older KulOffice would refuse to start without it). kuloffice.env is
+# only added to, never rewritten; kuloffice is recreated to read it.
+dev_claim_sends() {
+  local tag file=kuloffice.env added=no kv
+  tag=$(unit_tag kuloffice || true)
+  is_version "$tag" && [[ $(version_cmp "$tag" v0.1.8-alpha09) -ge 0 ]] || return 0
+  touch "$file"
+  for kv in KULOFFICE_CLAIM_SENDS_ENABLED=true KULOFFICE_CLAIM_SENDS_RESERVATION_MARGIN=48h KULOFFICE_CLAIM_SENDS_MAX_CAPACITY=2; do
+    grep -q "^${kv%%=*}=" "$file" || { echo "$kv" >> "$file"; added=yes; }
+  done
+  [[ $added == yes ]] || return 0
+  say "claim sends on in $file; recreating kuloffice"
+  compose up -d --force-recreate kuloffice || true
+  check_unit kuloffice || say "warning: kuloffice is not healthy after turning claim sends on (see make logs)"
 }
 
 # The units whose deploy can lose the admin (keycloak: staff accounts;
