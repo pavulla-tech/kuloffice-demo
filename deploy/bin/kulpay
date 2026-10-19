@@ -498,14 +498,15 @@ gateway_secrets() {
 # empty in production): the developers' admin operator, kept in place after
 # every deploy that can lose it or that brings new permissions. Its workforce
 # account (with that password), the operator, and the Administradores role
-# holding every permission in kuloffice's catalogue (make operator ROLE=ADMIN).
+# holding every permission in kuloffice's catalogue (make operator ROLE=ADMIN),
+# and the Solange console's admin role (QR templates, apps, keys).
 dev_admin() {
   local email pw
   email=$(env_get DEV_ADMIN_EMAIL || true); pw=$(env_get DEV_ADMIN_PASSWORD || true)
   [[ -n $email && -n $pw ]] || return 0
   say "development admin: $email, every operator permission"
   compose --profile tools run --rm -e STAFF_EMAIL="$email" -e STAFF_PASSWORD="$pw" -e STAFF_PASSWORD_PERMANENT=1 \
-    -e STAFF_FIRST_NAME=Developers -e STAFF_LAST_NAME=Pavulla -e KULOFFICE_ROLE=ADMIN -e SOLANGE_ROLES= \
+    -e STAFF_FIRST_NAME=Developers -e STAFF_LAST_NAME=Pavulla -e KULOFFICE_ROLE=ADMIN -e SOLANGE_ROLES=admin \
     tools /tools/operator.sh || say "warning: the development admin was not seeded (make operator to retry)"
 }
 
