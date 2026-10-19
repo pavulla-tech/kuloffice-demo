@@ -11,6 +11,7 @@
 #   kulpay restore  <database> <file> --yes      replace a database
 #   kulpay provision                             init, Gateway events, then QR codes (idempotent)
 #   kulpay secrets                               generate the missing generated values into .env
+#   kulpay operator-roles [grant ROLE...]        list operator roles; give a role every permission
 #
 # Options anywhere: --actor NAME (who asked; CI passes the GitHub user).
 #
@@ -713,6 +714,15 @@ cmd_restore() {
   say "restored $1; recreate its service (make restart S=…)"
 }
 
+# Operator roles through KulOffice's role API, as the env admin (Basic).
+cmd_operator_roles() {
+  command -v python3 >/dev/null || die "python3 is needed"
+  KO_URL="http://127.0.0.1:$(env_get KULOFFICE_PORT || true)"
+  [[ $KO_URL == "http://127.0.0.1:" ]] && KO_URL=http://127.0.0.1:9280
+  KO_USER=$(env_get KULOFFICE_ADMIN_EMAIL) KO_PASS=$(env_get KULOFFICE_ADMIN_PASSWORD) KO_URL=$KO_URL \
+    python3 lib/operator_roles.py "$@"
+}
+
 args=()
 while (($#)); do
   case $1 in
@@ -732,6 +742,7 @@ case $command in
   backup) cmd_backup "$@" ;;
   restore) cmd_restore "$@" ;;
   provision) cmd_provision ;;
+  operator-roles) cmd_operator_roles "$@" ;;
   secrets) gateway_secrets; kuloffice_secrets; say "generated values present in $ENV_FILE (not shown)" ;;
-  *) sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'; [[ $command == help ]] ;;
+  *) sed -n '2,22p' "$0" | sed 's/^# \{0,1\}//'; [[ $command == help ]] ;;
 esac
