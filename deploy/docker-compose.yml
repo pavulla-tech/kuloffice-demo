@@ -205,7 +205,8 @@ services:
             mode: live
             account_id: "$$GATEWAY_ACCOUNT_ID"
             label: "kuloffice account integrations"
-            scopes: [payments:read, payments:write, transactions:read, transactions:write, bills:read, bills:write, bills:artifacts, webhooks:manage]
+            # links:* for Orientu's payment links (POST/DELETE /v1/admin/links).
+            scopes: [payments:read, payments:write, transactions:read, transactions:write, links:read, links:write, bills:read, bills:write, bills:artifacts, webhooks:manage]
             rate_per_minute: 600
           - id: kuloffice-service
             secret: "$$GATEWAY_SERVICE_API_KEY"
@@ -293,6 +294,14 @@ services:
       KULPAY_KULOFFICE_AUDIENCE: ${ADMIN_CLIENT_ID:-kulpay-backend}
       KULPAY_KULOFFICE_TIMEOUT: 30s
       KULPAY_KULOFFICE_FEE_INSTRUCTION_OVERDUE: 24h
+      # Cash deposits at other PSPs: the platform's kulpay_cms connector asks
+      # KulOffice's POST /v1/beneficiaries/lookup who a deposit reference is,
+      # with a key and an HMAC signature both sides share (bin/kulpay
+      # generates them).
+      KULPAY_CONNECTORS_KULPAY_CMS_ENABLED: "true"
+      KULPAY_CONNECTORS_KULPAY_CMS_BASE_URL: http://kuloffice:8080
+      KULPAY_CONNECTORS_KULPAY_CMS_API_KEY: ${KULPAY_CMS_LOOKUP_API_KEY:-}
+      KULPAY_CONNECTORS_KULPAY_CMS_SIGNING_SECRET: ${KULPAY_CMS_LOOKUP_SIGNING_SECRET:-}
     volumes:
       - gateway-config:/etc/kulpay:ro
     healthcheck:
@@ -546,6 +555,14 @@ services:
       KULOFFICE_INCOMING_TRANSFERS_WEBHOOK_SECRETS: ${KULOFFICE_INCOMING_TRANSFERS_WEBHOOK_SECRETS:-}
       KULOFFICE_INCOMING_TRANSFERS_POLL_INTERVAL: 5m
       KULOFFICE_INCOMING_TRANSFERS_MAX_CAPACITY: "2"
+      # The Gateway's cash-deposit reference lookup (the same pair as its
+      # kulpay_cms connector); both set turn POST /v1/beneficiaries/lookup on.
+      KULOFFICE_INCOMING_TRANSFERS_LOOKUP_API_KEYS: ${KULPAY_CMS_LOOKUP_API_KEY:-}
+      KULOFFICE_INCOMING_TRANSFERS_LOOKUP_SIGNING_SECRETS: ${KULPAY_CMS_LOOKUP_SIGNING_SECRET:-}
+      # Orientu's escrow and tips: Conta Pagamento products of an account
+      # KulOffice owns. Empty: causes take immediate only, and no tips.
+      KULOFFICE_ORIENTU_CUSTODY_PRODUCT_ID: ${KULOFFICE_ORIENTU_CUSTODY_PRODUCT_ID:-}
+      KULOFFICE_ORIENTU_TIPS_PRODUCT_ID: ${KULOFFICE_ORIENTU_TIPS_PRODUCT_ID:-}
       KULOFFICE_SUPPLY_ENABLED: ${KULOFFICE_SUPPLY_ENABLED:-false}
       KULOFFICE_SUPPLY_CLEARING_BALANCE: ${KULOFFICE_SUPPLY_CLEARING_BALANCE:-}
       KULOFFICE_SUPPLY_RESERVATION_TTL: 168h
