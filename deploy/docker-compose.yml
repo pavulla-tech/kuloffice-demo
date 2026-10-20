@@ -272,6 +272,10 @@ services:
       # the caller (KulOffice), so containers still reach gateway:9090.
       KULPAY_EXTERNAL_URL: ${GATEWAY_PUBLIC_URL:-https://gateway.kulpay.pavulla.com}
       KULPAY_DEFAULT_CURRENCY: MZN
+      # Events go to kuloffice inside this compose network (a private
+      # address); the Gateway refuses such webhook URLs unless this is on.
+      # Compose only, never production.
+      KULPAY_WEBHOOK_ALLOW_PRIVATE_DESTINATIONS: "true"
       KULPAY_DEFAULT_COUNTRY: MZ
       KULPAY_ACCOUNT_NAME: KulPay
       KULPAY_ACCOUNT_ID: ${GATEWAY_ACCOUNT_ID:?set GATEWAY_ACCOUNT_ID}

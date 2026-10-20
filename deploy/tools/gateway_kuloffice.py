@@ -20,6 +20,9 @@ MODE = os.environ.get("GATEWAY_MODE", "live")
 URL = os.environ.get("GATEWAY_KULOFFICE_EVENT_URL", "http://kuloffice:8080/v1/integrations/kulpay-gateway/events")
 HAVE_INCOMING_SECRET = bool(os.environ.get("KULOFFICE_INCOMING_TRANSFERS_WEBHOOK_SECRETS", "").strip())
 HAVE_SERVICE_SECRET = bool(os.environ.get("KULOFFICE_PAYMENT_ACCEPTANCE_WEBHOOK_SECRETS", "").strip())
+# KulOffice's account endpoint: its incoming transfers, and its businesses'
+# bills, KulOffice being their Gateway biller.
+ACCOUNT_EVENTS = ["incoming_transfer.*", "bill_invoice.*", "bill_remittance.*"]
 
 
 def request(method, path, key, body=None):
@@ -78,7 +81,7 @@ def ensure_incoming_endpoint():
             "POST",
             "/webhook-endpoints",
             ACCOUNT_KEY,
-            {"url": URL, "event_types": ["incoming_transfer.*"]},
+            {"url": URL, "event_types": ACCOUNT_EVENTS},
         )
         secret = created.get("secret", "") if isinstance(created, dict) else ""
         if not secret:
@@ -86,6 +89,11 @@ def ensure_incoming_endpoint():
         print("incoming-transfer endpoint created", file=sys.stderr)
         return secret
     print("incoming-transfer endpoint already present", file=sys.stderr)
+    types = existing.get("event_types") or []
+    if "*" not in types and any(t not in types for t in ACCOUNT_EVENTS):
+        request("PATCH", f"/webhook-endpoints/{existing['id']}", ACCOUNT_KEY,
+                {"event_types": sorted(set(types) | set(ACCOUNT_EVENTS))})
+        print("incoming-transfer endpoint now also takes the bills' events", file=sys.stderr)
     if HAVE_INCOMING_SECRET:
         return ""
     _, rolled = request(
