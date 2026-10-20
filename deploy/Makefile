@@ -6,7 +6,7 @@
 .PHONY: help setup sync-env clean-env-backups config check-images \
         images push bundle load theme license \
         start start-portal stop restart logs ps update clean reset-blnk \
-        init operator solange-kulpay gateway-kuloffice \
+        init operator gateway-signin solange-kulpay gateway-kuloffice \
         deploy rollback releases status health backup restore
 
 ENV_FILE ?= .env
@@ -55,7 +55,7 @@ help:
 	@echo "Provisioning (on the server, after start)"
 	@echo "  make init               realms, clients, kuloffice license and identity providers"
 	@echo "  make gateway-kuloffice  Gateway event endpoints and signing secrets for KulOffice"
-	@echo "  make operator EMAIL=… FIRST=… LAST=… [ROLE=Revisores|ADMIN] [SOLANGE=viewer,developer]"
+	@echo "  make operator EMAIL=… FIRST=… LAST=… [ROLE=Revisores|ADMIN] [SOLANGE=viewer,developer] [GATEWAY=1]"
 	@echo "                          ROLE=ADMIN: the Administradores role (every kuloffice permission)"
 	@echo "                          a staff account; ROLE= (empty) for Solange only"
 	@echo "  make solange-kulpay     KulPay's app in Solange, kuloffice's key and webhook (into .env)"
@@ -236,10 +236,19 @@ gateway-kuloffice:
 # ROLE=ADMIN: an admin, holding every permission in kuloffice's catalogue.
 ROLE ?= Revisores
 SOLANGE ?=
+GATEWAY ?=
 operator:
-	@[ -n "$(EMAIL)" ] || { echo "usage: make operator EMAIL=… FIRST=… LAST=… [ROLE=Revisores|ADMIN] [SOLANGE=viewer]" >&2; exit 1; }
+	@[ -n "$(EMAIL)" ] || { echo "usage: make operator EMAIL=… FIRST=… LAST=… [ROLE=Revisores|ADMIN] [SOLANGE=viewer] [GATEWAY=1]" >&2; exit 1; }
 	$(COMPOSE) --profile tools run --rm -e STAFF_EMAIL="$(EMAIL)" -e STAFF_FIRST_NAME="$(FIRST)" -e STAFF_LAST_NAME="$(LAST)" \
-		-e KULOFFICE_ROLE="$(ROLE)" -e SOLANGE_ROLES="$(SOLANGE)" tools /tools/operator.sh
+		-e KULOFFICE_ROLE="$(ROLE)" -e SOLANGE_ROLES="$(SOLANGE)" -e GATEWAY_OPERATOR="$(GATEWAY)" tools /tools/operator.sh
+
+# The Gateway operator dashboard's sign-in (workforce realm): its secret into
+# .env, its Keycloak client, then the gateway recreated to read them. Grant
+# staff its role with make operator … GATEWAY=1.
+gateway-signin:
+	@bin/kulpay secrets
+	$(COMPOSE) --profile tools run --rm tools -c 'KC_BOOTSTRAP_ADMIN_USERNAME="$${KC_ADMIN_USER:-admin}" KC_BOOTSTRAP_ADMIN_PASSWORD="$$KC_ADMIN_PASSWORD" python3 /tools/gateway_admin_client.py'
+	$(COMPOSE) up -d --force-recreate gateway-config gateway
 
 # KulPay's app in Solange, kuloffice's key and the webhook to kuloffice, each
 # step only if missing; the secrets go straight into .env, then kuloffice is

@@ -5,7 +5,8 @@ password (STAFF_PASSWORD, or a random one printed once) that must be changed at
 the first sign-in; with STAFF_PASSWORD_PERMANENT=1 (development stacks'
 seeded admin) STAFF_PASSWORD is the account's password, set again on every
 run. SOLANGE_ROLES (comma separated: viewer, developer, admin)
-grants Solange console roles.
+grants Solange console roles. GATEWAY_OPERATOR=1 grants the Gateway operator
+dashboard's role (tools/gateway_admin_client.py).
 """
 import json
 import os
@@ -18,6 +19,7 @@ import urllib.request
 KEYCLOAK = os.environ["KEYCLOAK_URL"].rstrip("/")
 REALM = os.environ.get("WORKFORCE_REALM", "workforce")
 CONSOLE_CLIENT = os.environ.get("SOLANGE_CONSOLE_CLIENT_ID", "solange-console")
+GATEWAY_CLIENT = os.environ.get("GATEWAY_OIDC_CLIENT_ID", "kulpay-gateway-admin")
 EMAIL = os.environ["STAFF_EMAIL"].strip().lower()
 PERMANENT = os.environ.get("STAFF_PASSWORD_PERMANENT") == "1" and bool(os.environ.get("STAFF_PASSWORD"))
 
@@ -81,6 +83,16 @@ def main():
             sys.exit(f"unknown Solange role in {wanted} (viewer, developer, admin)")
         call("POST", f"/admin/realms/{REALM}/users/{uid}/role-mappings/clients/{cid}", t, body=roles)
         print(f"  ok  Solange console roles: {', '.join(wanted)}")
+    if os.environ.get("GATEWAY_OPERATOR", "").strip() in ("1", "true", "yes"):
+        found = call("GET", f"/admin/realms/{REALM}/clients?clientId={GATEWAY_CLIENT}", t)[1]
+        if not isinstance(found, list) or not found:
+            print(f"  --  no {GATEWAY_CLIENT} client yet (make gateway-signin), Gateway role not granted")
+        else:
+            status, role = call("GET", f"/admin/realms/{REALM}/clients/{found[0]['id']}/roles/operator", t)
+            if status != 200:
+                sys.exit(f"no operator role on {GATEWAY_CLIENT}: {status} {role}")
+            call("POST", f"/admin/realms/{REALM}/users/{uid}/role-mappings/clients/{found[0]['id']}", t, body=[role])
+            print("  ok  Gateway operator dashboard")
 
 
 if __name__ == "__main__":

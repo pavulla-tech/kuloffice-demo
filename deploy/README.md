@@ -149,7 +149,14 @@ make operator EMAIL=ana@pavulla.com FIRST=Ana LAST=Macuacua                 # a 
 make operator EMAIL=rui@pavulla.com FIRST=Rui LAST=Lopes SOLANGE=developer   # also in Solange
 make operator EMAIL=eva@pavulla.com FIRST=Eva LAST=Sitoe ROLE= SOLANGE=viewer # Solange only
 make operator EMAIL=ze@pavulla.com FIRST=Zé LAST=Tembe ROLE=ADMIN SOLANGE=admin  # an admin, everywhere
+make operator EMAIL=lia@pavulla.com FIRST=Lia LAST=Cossa ROLE= GATEWAY=1        # the Gateway dashboard only
 ```
+
+- **`GATEWAY=1`:** the Gateway operator dashboard (`https://mgnt.kulpay.pavulla.com/admin/`).
+  Turn its sign-in on once: `GATEWAY_OIDC_ENABLED=true` in `.env`, then
+  `make gateway-signin` (its client in the workforce realm, the generated secrets, the
+  gateway recreated). Each operator signs in as themselves, so the Gateway's four-eyes
+  approvals need two people with the role. The development admin gets it on every deploy.
 
 - **The account:** a workforce account with a temporary password (printed
   once, changed at the first sign-in).
