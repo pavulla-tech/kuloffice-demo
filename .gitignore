@@ -3,3 +3,4 @@ stack.env
 .stack/
 stack.kuloffice.env
 pictures
+__pycache__/
