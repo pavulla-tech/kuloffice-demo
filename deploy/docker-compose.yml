@@ -592,6 +592,10 @@ services:
       # for the customer (the simulator holds it up to 60s), so the client
       # timeout outlasts it; a timeout is an unknown outcome, re-sent with the
       # same reference.
+      # KulPay Lite accounts (made on USSD, no KYC) get a Conta Pagamento and
+      # may move money within the Lite limits (owner, 2026-10-21). Accounts
+      # made before: docker compose exec kuloffice kuloffice lite-backfill.
+      KULOFFICE_LITE_ACCOUNTS_ENABLED: ${KULOFFICE_LITE_ACCOUNTS_ENABLED:-true}
       KULOFFICE_TOPUP_ENABLED: "true"
       KULOFFICE_TOPUP_GATEWAY: kulpay-gateway
       KULOFFICE_TOPUP_GATEWAY_URL: http://gateway:9090
