@@ -23,6 +23,9 @@ class FakeGateway:
             return 200, {"data": [self.incoming] if self.incoming else []}
         if method == "POST" and path == "/webhook-endpoints":
             return 201, {"id": "wh_1", "secret": "incoming-new"}
+        if method == "PATCH" and path.startswith("/webhook-endpoints/"):
+            self.incoming = {**self.incoming, **(body or {})}
+            return 200, self.incoming
         if method == "POST" and path.endswith("/roll-secret") and path.startswith("/webhook-endpoints/"):
             return 200, {"endpoint": {"secret": "incoming-rolled"}}
         if method == "GET" and path == "/admin/service-event-sinks":
@@ -66,7 +69,7 @@ class ProvisioningTest(unittest.TestCase):
         self.assertNotIn("service-new", stderr)
         incoming_create = next(call for call in fake.calls if call[:2] == ("POST", "/webhook-endpoints"))
         self.assertEqual(incoming_create[2], "account-key")
-        self.assertEqual(incoming_create[3]["event_types"], ["incoming_transfer.*"])
+        self.assertEqual(incoming_create[3]["event_types"], ["incoming_transfer.*", "bill_invoice.*", "bill_remittance.*"])
         sink_create = next(call for call in fake.calls if call[:2] == ("POST", "/admin/service-event-sinks"))
         self.assertEqual(sink_create[2], "admin-key")
         self.assertEqual(sink_create[3]["event_types"], ["payment.*"])
@@ -104,6 +107,40 @@ class ProvisioningTest(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "remove or migrate it explicitly"):
             gateway.ensure_incoming_endpoint()
         self.assertFalse(any(call[:2] == ("POST", "/webhook-endpoints") for call in fake.calls))
+
+
+class AccountEventsTest(unittest.TestCase):
+    def setUp(self):
+        gateway.ACCOUNT_KEY = "account-key"
+        gateway.ADMIN_KEY = "admin-key"
+        gateway.MODE = "live"
+        gateway.URL = "http://kuloffice:8080/v1/integrations/kulpay-gateway/events"
+        gateway.HAVE_INCOMING_SECRET = True
+
+    def test_a_new_endpoint_takes_the_bills_events(self):
+        fake = FakeGateway()
+        gateway.request = fake
+        gateway.HAVE_INCOMING_SECRET = False
+        with contextlib.redirect_stderr(io.StringIO()):
+            gateway.ensure_incoming_endpoint()
+        created = [c for c in fake.calls if c[0] == "POST" and c[1] == "/webhook-endpoints"][0]
+        self.assertEqual(created[3]["event_types"], ["incoming_transfer.*", "bill_invoice.*", "bill_remittance.*"])
+
+    def test_an_existing_endpoint_is_subscribed_to_the_bills_events(self):
+        fake = FakeGateway(incoming={"id": "wh_1", "mode": "live", "url": gateway.URL, "status": "active", "event_types": ["incoming_transfer.*"]})
+        gateway.request = fake
+        with contextlib.redirect_stderr(io.StringIO()):
+            gateway.ensure_incoming_endpoint()
+        patched = [c for c in fake.calls if c[0] == "PATCH"]
+        self.assertEqual(len(patched), 1)
+        self.assertEqual(patched[0][3]["event_types"], ["bill_invoice.*", "bill_remittance.*", "incoming_transfer.*"])
+
+    def test_an_endpoint_with_everything_is_left_alone(self):
+        fake = FakeGateway(incoming={"id": "wh_1", "mode": "live", "url": gateway.URL, "status": "active", "event_types": ["*"]})
+        gateway.request = fake
+        with contextlib.redirect_stderr(io.StringIO()):
+            gateway.ensure_incoming_endpoint()
+        self.assertEqual([c for c in fake.calls if c[0] == "PATCH"], [])
 
 
 if __name__ == "__main__":

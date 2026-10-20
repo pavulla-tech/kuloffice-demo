@@ -2,6 +2,10 @@
   "_about": "Development stacks' notification texts (pt): proposed and approved by tools/dev_rules.py when an event has no approved text. Operators replace them in the back office; a text in force is never overwritten. Variables are {name}, as KulOffice's events list them.",
   "language": "pt",
   "texts": [
+    {"event": "kyc.action_needed", "channel": "sms", "text": "KulPay: precisamos de mais informação para verificar a sua conta. Abra a aplicação KulPay para ver o que falta."},
+    {"event": "kyc.approved", "channel": "sms", "text": "KulPay: a sua conta foi verificada. Já pode usar a sua carteira KulPay."},
+    {"event": "kyc.rejected", "channel": "sms", "text": "KulPay: não foi possível verificar a sua conta. Abra a aplicação KulPay para ver o motivo."},
+
     {"event": "claim_send.waiting", "channel": "sms", "text": "KulPay: {sender_name} enviou-lhe {amount}. Crie a sua conta KulPay com este numero ate {deadline} para receber."},
     {"event": "claim_send.claimed", "channel": "sms", "text": "KulPay: os {amount} que enviou para {phone} foram recebidos."},
     {"event": "claim_send.expired", "channel": "sms", "text": "KulPay: ninguem recebeu os {amount} que enviou para {phone}. O valor voltou ao seu saldo."},
@@ -36,6 +40,11 @@
     {"event": "orientu.funds_released", "channel": "inbox", "text": "{amount} da causa \"{reason}\" estão agora no seu saldo."},
     {"event": "orientu.contribution_refunded", "channel": "inbox", "text": "A sua contribuição de {amount} para \"{reason}\" foi devolvida."},
     {"event": "orientu.funds_held", "channel": "inbox", "text": "{amount} do seu saldo ficam indisponíveis até {when}."},
-    {"event": "orientu.funds_hold_released", "channel": "inbox", "text": "{amount} do seu saldo estão disponíveis de novo."}
+    {"event": "orientu.funds_hold_released", "channel": "inbox", "text": "{amount} do seu saldo estão disponíveis de novo."},
+
+    {"event": "business_plan.change_submitted", "channel": "inbox", "text": "Recebemos o pedido para passar ao plano {plan}. Mantém o plano {current_plan} até à decisão."},
+    {"event": "business_plan.change_approved", "channel": "inbox", "text": "O seu negócio passou ao plano {plan}. Os novos limites já se aplicam."},
+    {"event": "business_plan.change_rejected", "channel": "inbox", "text": "O pedido para passar ao plano {plan} não foi aprovado: {note}"},
+    {"event": "business_plan.change_cancelled", "channel": "inbox", "text": "O pedido para passar ao plano {plan} foi cancelado."}
   ]
 }

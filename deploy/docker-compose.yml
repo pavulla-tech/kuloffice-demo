@@ -272,6 +272,10 @@ services:
       # the caller (KulOffice), so containers still reach gateway:9090.
       KULPAY_EXTERNAL_URL: ${GATEWAY_PUBLIC_URL:-https://gateway.kulpay.pavulla.com}
       KULPAY_DEFAULT_CURRENCY: MZN
+      # Events go to kuloffice inside this compose network (a private
+      # address); the Gateway refuses such webhook URLs unless this is on.
+      # Compose only, never production.
+      KULPAY_WEBHOOK_ALLOW_PRIVATE_DESTINATIONS: "true"
       KULPAY_DEFAULT_COUNTRY: MZ
       KULPAY_ACCOUNT_NAME: KulPay
       KULPAY_ACCOUNT_ID: ${GATEWAY_ACCOUNT_ID:?set GATEWAY_ACCOUNT_ID}
@@ -330,6 +334,9 @@ services:
       BIND_GATEWAY_ADMIN_URL: http://gateway:9091
       BIND_ADMIN_KEY: ${GATEWAY_ADMIN_KEY}
       BIND_SIMULATOR_URL: http://simulator:8085
+      BIND_GATEWAY_CALLBACK_BASE: http://gateway:9090
+      BIND_CALLBACK_SECRET: ${SIMULATOR_CALLBACK_SECRET:-simulator-callback-secret}
+      BIND_STRIPE_WEBHOOK_SECRET: ${SIMULATOR_STRIPE_WEBHOOK_SECRET:-whsec_simulator_gateway}
       BIND_MODE: live
 
   # Development only: plays M-Pesa, e-Mola and the card acquirer, and their
@@ -343,6 +350,11 @@ services:
       SIMULATOR_PUBLIC_URL: ${SIMULATOR_PUBLIC_URL:?set SIMULATOR_PUBLIC_URL}
       SIMULATOR_HOLD_SECONDS: "60"
       SIMULATOR_DEFAULT_BALANCE_MINOR: "5000000"
+      SIMULATOR_DEFAULT_PROVIDER_FLOAT_MINOR: ${SIMULATOR_DEFAULT_PROVIDER_FLOAT_MINOR:-500000000}
+      SIMULATOR_GATEWAY_URL: http://gateway:9090/v1
+      SIMULATOR_GATEWAY_PARTNER_KEY: ${SIMULATOR_GATEWAY_PARTNER_KEY:-}
+      SIMULATOR_GATEWAY_MODE: ${SIMULATOR_GATEWAY_MODE:-test}
+      SIMULATOR_STATEMENT_PROFILE_ID: ${SIMULATOR_STATEMENT_PROFILE_ID:-}
     volumes:
       - simulator-data:/data
     ports:
@@ -559,10 +571,10 @@ services:
       # kulpay_cms connector); both set turn POST /v1/beneficiaries/lookup on.
       KULOFFICE_INCOMING_TRANSFERS_LOOKUP_API_KEYS: ${KULPAY_CMS_LOOKUP_API_KEY:-}
       KULOFFICE_INCOMING_TRANSFERS_LOOKUP_SIGNING_SECRETS: ${KULPAY_CMS_LOOKUP_SIGNING_SECRET:-}
-      # Orientu's escrow and tips: Conta Pagamento products of an account
-      # KulOffice owns. Empty: causes take immediate only, and no tips.
-      KULOFFICE_ORIENTU_CUSTODY_PRODUCT_ID: ${KULOFFICE_ORIENTU_CUSTODY_PRODUCT_ID:-}
-      KULOFFICE_ORIENTU_TIPS_PRODUCT_ID: ${KULOFFICE_ORIENTU_TIPS_PRODUCT_ID:-}
+      # Businesses' bills as Gateway invoices; the clearing balance is the
+      # BLNK bootstrap's @KulPay_<env>_GatewayBills_MZN.
+      KULOFFICE_GATEWAY_BILLS_ENABLED: ${KULOFFICE_GATEWAY_BILLS_ENABLED:-false}
+      KULOFFICE_GATEWAY_BILLS_OFFERING_ID: ${KULOFFICE_GATEWAY_BILLS_OFFERING_ID:-}
       KULOFFICE_APPROVALS_SINGLE_OPERATOR: ${KULOFFICE_APPROVALS_SINGLE_OPERATOR:-false}
       KULOFFICE_SUPPLY_ENABLED: ${KULOFFICE_SUPPLY_ENABLED:-false}
       KULOFFICE_SUPPLY_CLEARING_BALANCE: ${KULOFFICE_SUPPLY_CLEARING_BALANCE:-}
