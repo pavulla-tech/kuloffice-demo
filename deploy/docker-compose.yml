@@ -363,6 +363,9 @@ services:
     environment:
       SIMULATOR_ADDR: ":8085"
       SIMULATOR_PUBLIC_URL: ${SIMULATOR_PUBLIC_URL:?set SIMULATOR_PUBLIC_URL}
+      # Provider base URLs embedded in merchant connector credentials must be
+      # reachable from Gateway inside this Compose network.
+      SIMULATOR_PROVIDER_URL: http://simulator:8085
       SIMULATOR_HOLD_SECONDS: "60"
       SIMULATOR_DEFAULT_BALANCE_MINOR: "5000000"
       SIMULATOR_DEFAULT_PROVIDER_FLOAT_MINOR: ${SIMULATOR_DEFAULT_PROVIDER_FLOAT_MINOR:-500000000}
