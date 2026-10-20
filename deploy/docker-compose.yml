@@ -273,6 +273,13 @@ services:
       # OAuth redirects are built on it. Payments' own callback URLs come from
       # the caller (KulOffice), so containers still reach gateway:9090.
       KULPAY_EXTERNAL_URL: ${GATEWAY_PUBLIC_URL:-https://gateway.kulpay.pavulla.com}
+      # PSP onboarding confirmations and partner-portal sign-in links are sent
+      # from the Gateway notification outbox. Use a STARTTLS relay (normally
+      # port 587); secrets live only in deploy/.env.
+      KULPAY_SMTP_ADDR: ${KULPAY_SMTP_ADDR:-}
+      KULPAY_SMTP_FROM: ${KULPAY_SMTP_FROM:-}
+      KULPAY_SMTP_USERNAME: ${KULPAY_SMTP_USERNAME:-}
+      KULPAY_SMTP_PASSWORD: ${KULPAY_SMTP_PASSWORD:-}
       KULPAY_DEFAULT_CURRENCY: MZN
       # Events go to kuloffice inside this compose network (a private
       # address); the Gateway refuses such webhook URLs unless this is on.
