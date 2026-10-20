@@ -206,7 +206,9 @@ services:
             account_id: "$$GATEWAY_ACCOUNT_ID"
             label: "kuloffice account integrations"
             # links:* for Orientu's payment links (POST/DELETE /v1/admin/links).
-            scopes: [payments:read, payments:write, transactions:read, transactions:write, links:read, links:write, bills:read, bills:write, bills:artifacts, webhooks:manage]
+            # invoices:* for businesses' bills, KulOffice being their biller:
+            # presenting, reading, cancelling invoices and the remittances.
+            scopes: [payments:read, payments:write, transactions:read, transactions:write, links:read, links:write, bills:read, bills:write, bills:artifacts, invoices:read, invoices:write, webhooks:manage]
             rate_per_minute: 600
           - id: kuloffice-service
             secret: "$$GATEWAY_SERVICE_API_KEY"
