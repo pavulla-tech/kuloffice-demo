@@ -391,6 +391,10 @@ services:
       SIMULATOR_GATEWAY_PARTNER_KEY: ${SIMULATOR_GATEWAY_PARTNER_KEY:-}
       SIMULATOR_GATEWAY_MODE: ${SIMULATOR_GATEWAY_MODE:-test}
       SIMULATOR_STATEMENT_PROFILE_ID: ${SIMULATOR_STATEMENT_PROFILE_ID:-}
+      # The partner PSP's webhook receiver: register
+      # http://simulator:8085/partner-webhooks in the Gateway portal's webhooks
+      # step and put the secret it shows once here.
+      SIMULATOR_PARTNER_WEBHOOK_SECRET: ${SIMULATOR_PARTNER_WEBHOOK_SECRET:-}
     volumes:
       - simulator-data:/data
     ports:
