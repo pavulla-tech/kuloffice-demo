@@ -376,7 +376,11 @@ services:
       SIMULATOR_HOLD_SECONDS: "60"
       SIMULATOR_DEFAULT_BALANCE_MINOR: "5000000"
       SIMULATOR_DEFAULT_PROVIDER_FLOAT_MINOR: ${SIMULATOR_DEFAULT_PROVIDER_FLOAT_MINOR:-500000000}
-      SIMULATOR_GATEWAY_URL: http://gateway:9090/v1
+      # The partner-bank workbench calls the Gateway's /v1 partner API, which
+      # only the management listener (9091) serves; the public one (9090)
+      # answers 404 there. (The merchant lab's charges are on the public root
+      # and need their own setting in the simulator.)
+      SIMULATOR_GATEWAY_URL: http://gateway:9091/v1
       SIMULATOR_GATEWAY_PARTNER_KEY: ${SIMULATOR_GATEWAY_PARTNER_KEY:-}
       SIMULATOR_GATEWAY_MODE: ${SIMULATOR_GATEWAY_MODE:-test}
       SIMULATOR_STATEMENT_PROFILE_ID: ${SIMULATOR_STATEMENT_PROFILE_ID:-}
