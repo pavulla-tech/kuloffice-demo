@@ -120,8 +120,8 @@ Application confirmations and partner-portal sign-in links use the Gateway's
 notification outbox. Configure `KULPAY_SMTP_ADDR`, `KULPAY_SMTP_FROM`,
 `KULPAY_SMTP_USERNAME` and `KULPAY_SMTP_PASSWORD` in the server's ignored
 `deploy/.env`, then recreate the Gateway with `make restart S=gateway`. The
-relay must support STARTTLS/PLAIN auth (normally port 587; implicit-TLS port
-465 is not supported by the current mailer). Verify with
+relay takes PLAIN auth over STARTTLS (normally port 587) or implicit TLS on
+port 465 (gateway v0.1.1-alpha07 on). Verify with
 `docker compose --env-file .env logs gateway` that there is no
 `no mail relay configured` warning and no SMTP delivery error.
 
