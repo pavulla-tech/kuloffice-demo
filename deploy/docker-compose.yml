@@ -328,8 +328,13 @@ services:
       KULPAY_CONNECTORS_KULPAY_CMS_BASE_URL: http://kuloffice:8080
       KULPAY_CONNECTORS_KULPAY_CMS_API_KEY: ${KULPAY_CMS_LOOKUP_API_KEY:-}
       KULPAY_CONNECTORS_KULPAY_CMS_SIGNING_SECRET: ${KULPAY_CMS_LOOKUP_SIGNING_SECRET:-}
+      # The launch matrix in force: the embedded one, plus live cash deposits
+      # (owner, 2026-10-20), so partner deposits credit KulPay accounts here.
+      # GET /v1/admin/launch-matrix shows it; make cash-deposits sets up the rest.
+      KULPAY_LAUNCH_MATRIX_FILE: /etc/kulpay-launch/launch_matrix.json
     volumes:
       - gateway-config:/etc/kulpay:ro
+      - ./gateway/launch_matrix.json:/etc/kulpay-launch/launch_matrix.json:ro
     healthcheck:
       test: ["CMD", "kulpay-payments", "healthcheck"]
       interval: 15s

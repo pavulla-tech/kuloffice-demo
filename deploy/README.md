@@ -136,6 +136,23 @@ The simulator has two distinct Gateway relationships:
   workbench's “Gateway not configured” state is expected and does not mean the
   provider bindings are broken.
 
+### Partner cash deposits (development)
+
+`make cash-deposits` makes a partner's cash deposit credit the KulPay account
+it was taken for: it generates the lookup secrets if missing, recreates the
+gateway with `gateway/launch_matrix.json` (the embedded matrix plus live cash
+deposits, owner 2026-10-20), turns on `cash_in_incoming` for KulOffice's
+gateway account, provisions KulOffice's event endpoint and sets
+`KULOFFICE_INCOMING_TRANSFERS_ENABLED=true`. KulOffice credits live deposits
+only (test-mode ones are ignored), and its test-mode lookup answers only the
+sandbox references `841000001` (found) and `841000410` (closed).
+
+The partner side is the PSP's: a capability matrix with a `NAME_LOOKUP` row for
+`cash_deposit` (approved in the dashboard), a live key (issued at pilot) set as
+`SIMULATOR_GATEWAY_PARTNER_KEY` with `SIMULATOR_GATEWAY_MODE=live`, and a
+statement profile for the receiving account (`SIMULATOR_STATEMENT_PROFILE_ID`),
+since a deposit is credited only when the statement shows it.
+
 **3. Apache.** For each file in `apache/`: get its certificate (`certbot
 certonly --apache -d <host>`), copy it to `/etc/apache2/sites-available/`,
 `a2ensite`, then `systemctl reload apache2`. Once:
