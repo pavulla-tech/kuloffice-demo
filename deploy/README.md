@@ -109,6 +109,33 @@ to the server's `deploy/` and run `make load FILE=kulpay-images-….tar.gz`
 there before setting `GATEWAY_TAG` / `SIMULATOR_TAG`. A deploy refuses a
 `localhost/` tag that is not loaded.
 
+### PSP onboarding and the simulator's Gateway connection
+
+PSPs apply at `GATEWAY_PUBLIC_URL/onboarding` (on the development server,
+`https://gateway.kulpay.pavulla.com/onboarding`). The Gateway keeps its own
+onboarding lifecycle, KYB review, technical setup, certification, pilot and
+go-live; this is not a KulOffice or simulator form.
+
+Application confirmations and partner-portal sign-in links use the Gateway's
+notification outbox. Configure `KULPAY_SMTP_ADDR`, `KULPAY_SMTP_FROM`,
+`KULPAY_SMTP_USERNAME` and `KULPAY_SMTP_PASSWORD` in the server's ignored
+`deploy/.env`, then recreate the Gateway with `make restart S=gateway`. The
+relay must support STARTTLS/PLAIN auth (normally port 587; implicit-TLS port
+465 is not supported by the current mailer). Verify with
+`docker compose --env-file .env logs gateway` that there is no
+`no mail relay configured` warning and no SMTP delivery error.
+
+The simulator has two distinct Gateway relationships:
+
+- its provider endpoints are already bound by `gateway-bind` for KulPay's own
+  payments; the successful `bound mpesa/emola/card` output confirms that link;
+- its Partner Bank workbench needs a PSP's own key. Once the enrolled PSP
+  reaches technical setup, reveal its sandbox key once, save it as
+  `SIMULATOR_GATEWAY_PARTNER_KEY` with `SIMULATOR_GATEWAY_MODE=test`, and
+  recreate the simulator with `make restart S=simulator`. Until then, the
+  workbench's “Gateway not configured” state is expected and does not mean the
+  provider bindings are broken.
+
 **3. Apache.** For each file in `apache/`: get its certificate (`certbot
 certonly --apache -d <host>`), copy it to `/etc/apache2/sites-available/`,
 `a2ensite`, then `systemctl reload apache2`. Once:
