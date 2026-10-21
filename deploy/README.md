@@ -419,6 +419,25 @@ KulOffice is recreated. If an endpoint exists but `.env` lost its secret, the
 command rotates that secret with a 24-hour grace period. The deployment tool's
 `bin/kulpay provision` action includes this step.
 
+KulPay's own purchases (a business bill paid on its Gateway invoice link, a
+recharge) can be paid with the KulPay wallet at the Gateway's hosted checkout:
+
+```bash
+make platform-wallet
+```
+
+writes one live `kulpay_balance` binding on the platform account
+(`GATEWAY_ACCOUNT_ID`) with the merchant bindings' KulOffice client and
+wake-up secret, destination account and product `platform`, and
+`application_id` = `KULOFFICE_CHECKOUT_PROVIDER_PLATFORM_APPLICATION_ID`
+(default `kulpay-platform`, the same value KulOffice reads). KulOffice then
+reserves the customer's Conta Pagamento and, on capture, moves it into its
+external funds balance (the reverse of a top-up); a void releases it and a
+refund moves it back. No merchant and no pricing plan: the Gateway's fees are
+already in the checkout total. Safe to repeat. It needs a KulOffice image with
+the platform checkout (`claude/platform-wallet`); before that KulOffice
+refuses the binding's authorizations.
+
 Incoming transfers, supply, Payment Acceptance and reconciliation remain off
 by default. Enable them in that order after each smoke test. Supply must not be
 enabled until `KULOFFICE_SUPPLY_CLEARING_BALANCE` names the real BLNK clearing

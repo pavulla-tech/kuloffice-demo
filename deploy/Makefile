@@ -55,6 +55,7 @@ help:
 	@echo "Provisioning (on the server, after start)"
 	@echo "  make init               realms, clients, kuloffice license and identity providers"
 	@echo "  make gateway-kuloffice  Gateway event endpoints and signing secrets for KulOffice"
+	@echo "  make platform-wallet    KulPay balance at the Gateway checkout for KulPay's own purchases"
 	@echo "  make cash-deposits      partner cash deposits credit KulPay accounts (live; dev only)"
 	@echo "  make operator EMAIL=… FIRST=… LAST=… [ROLE=Revisores|ADMIN] [SOLANGE=viewer,developer] [GATEWAY=1]"
 	@echo "                          ROLE=ADMIN: the Administradores role (every kuloffice permission)"
@@ -230,6 +231,13 @@ secrets:
 merchant-bindings:
 	@[ -n "$(APP)" ] || { echo "usage: make merchant-bindings APP=pacapp_…" >&2; exit 1; }
 	@ENV_FILE=$(ENV_FILE) COMPOSE="docker compose --env-file $(ENV_FILE)" sh scripts/merchant-bindings.sh "$(APP)"
+
+# KulPay balance at the Gateway's hosted checkout for KulPay's own purchases
+# (bills paid on their Gateway invoice link, recharges): one live binding on
+# the platform account (GATEWAY_ACCOUNT_ID), destination "platform". KulOffice
+# moves the money into its external funds balance. Safe to repeat.
+platform-wallet:
+	$(COMPOSE) --profile tools run --rm --entrypoint python3 -e BINDING_MODE=platform tools /tools/merchant_bindings.py
 
 gateway-kuloffice:
 	@ENV_FILE=$(ENV_FILE) COMPOSE="docker compose --env-file $(ENV_FILE)" sh scripts/gateway-kuloffice.sh

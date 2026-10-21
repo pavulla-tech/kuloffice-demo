@@ -5,6 +5,10 @@ and verifies KulOffice's signed checkout wake-ups (IG-45); in test mode it is
 the Gateway's mock rail, so test payments never reach KulOffice.
 A live application also gets M-Pesa at the PSP simulator, configured as the
 simulator's own `bind` does for KulOffice's account (dev servers only).
+BINDING_MODE=platform (make platform-wallet) binds KulPay balance live for the
+Gateway's platform account (GATEWAY_ACCOUNT_ID), for KulPay's own purchases
+at the hosted checkout: destination "platform", KulOffice's platform
+application id; KulOffice moves the money into its external funds balance.
 Nothing secret is printed: only each binding's id, mode and callback path.
 """
 
@@ -16,6 +20,8 @@ import urllib.request
 
 BASE = os.environ.get("GATEWAY_MANAGEMENT_URL", "http://gateway:9091/v1").rstrip("/")
 REALM = os.environ.get("REALM", "kulpay")
+# KulOffice's sentinel destination for a platform checkout.
+PLATFORM = "platform"
 
 
 def need(name):
@@ -31,6 +37,9 @@ def first_secret(name):
 
 def main():
     mode = need("BINDING_MODE")
+    if mode == "platform":
+        save(platform_body())
+        return
     if mode not in ("live", "test"):
         sys.exit(f"unknown environment {mode}")
     if mode == "test":
@@ -40,26 +49,7 @@ def main():
         save({"account_id": need("BINDING_TENANT"), "mode": "test", "method": "kulpay_balance", "driver": "mock",
               "label": "KulPay balance (test)", "enabled": True, "config": {}})
         return
-    wakeup = "KULOFFICE_CHECKOUT_PROVIDER_WAKEUP_SIGNING_SECRETS"
-    body = {
-        "account_id": need("BINDING_TENANT"),
-        "mode": mode,
-        "method": "kulpay_balance",
-        "driver": "kulpay_balance",
-        "label": "KulPay balance",
-        "enabled": True,
-        "config": {
-            "base_url": os.environ.get("KULOFFICE_URL", "http://kuloffice:8080"),
-            "token_url": f"http://keycloak:8080/realms/{REALM}/protocol/openid-connect/token",
-            "client_id": os.environ.get("GATEWAY_KULOFFICE_CLIENT_ID", "kulpay-gateway"),
-            "client_secret": need("GATEWAY_KULOFFICE_CLIENT_SECRET"),
-            "audience": os.environ.get("ADMIN_CLIENT_ID", "kulpay-backend"),
-            "signing_secret": first_secret(wakeup),
-            "destination_account_id": need("BINDING_ACCOUNT"),
-            "destination_product_id": need("BINDING_PRODUCT"),
-            "application_id": need("BINDING_APP"),
-        },
-    }
+    body = kulpay_balance(need("BINDING_TENANT"), mode, need("BINDING_ACCOUNT"), need("BINDING_PRODUCT"), need("BINDING_APP"))
     save(body)
     if mode == "live":
         sim = os.environ.get("SIMULATOR_URL", "http://simulator:8085").rstrip("/")
@@ -74,6 +64,37 @@ def main():
             "config": {"api_key": "simulator", "public_key": public_key, "service_provider_code": "171717",
                        "base_url": sim + "/mpesa", "timeout": "90s"},
         })
+
+
+def kulpay_balance(tenant, mode, account, product, application, label="KulPay balance"):
+    """A live KulPay balance binding: the Gateway calls KulOffice as its
+    service client and verifies KulOffice's signed wake-ups."""
+    return {
+        "account_id": tenant,
+        "mode": mode,
+        "method": "kulpay_balance",
+        "driver": "kulpay_balance",
+        "label": label,
+        "enabled": True,
+        "config": {
+            "base_url": os.environ.get("KULOFFICE_URL", "http://kuloffice:8080"),
+            "token_url": f"http://keycloak:8080/realms/{REALM}/protocol/openid-connect/token",
+            "client_id": os.environ.get("GATEWAY_KULOFFICE_CLIENT_ID", "kulpay-gateway"),
+            "client_secret": need("GATEWAY_KULOFFICE_CLIENT_SECRET"),
+            "audience": os.environ.get("ADMIN_CLIENT_ID", "kulpay-backend"),
+            "signing_secret": first_secret("KULOFFICE_CHECKOUT_PROVIDER_WAKEUP_SIGNING_SECRETS"),
+            "destination_account_id": account,
+            "destination_product_id": product,
+            "application_id": application,
+        },
+    }
+
+
+def platform_body():
+    """The platform account's live KulPay balance binding (KulPay's own
+    purchases: bills on Gateway invoice links, recharges)."""
+    application = os.environ.get("KULOFFICE_CHECKOUT_PROVIDER_PLATFORM_APPLICATION_ID", "").strip() or "kulpay-platform"
+    return kulpay_balance(need("GATEWAY_ACCOUNT_ID"), "live", PLATFORM, PLATFORM, application, label="KulPay balance (platform)")
 
 
 def save(body):

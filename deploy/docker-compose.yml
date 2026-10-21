@@ -634,6 +634,9 @@ services:
       KULOFFICE_SUPPLY_CATALOG_CACHE_TTL: 60s
       KULOFFICE_CHECKOUT_PROVIDER_GATEWAY_CLIENT_ID: ${GATEWAY_KULOFFICE_CLIENT_ID:-kulpay-gateway}
       KULOFFICE_CHECKOUT_PROVIDER_APPROVAL_URL: ${WEB_PUBLIC_URL}/pagar/{id}
+      # The platform kulpay_balance binding's application id (make
+      # platform-wallet): its checkouts pay KulPay into external funds.
+      KULOFFICE_CHECKOUT_PROVIDER_PLATFORM_APPLICATION_ID: ${KULOFFICE_CHECKOUT_PROVIDER_PLATFORM_APPLICATION_ID:-kulpay-platform}
       # IG-45: signed checkout_authorization.updated wake-ups to each
       # kulpay_balance binding's callback on the Gateway's public listener.
       # Every binding's signing_secret is its mode's secret below; a mode
