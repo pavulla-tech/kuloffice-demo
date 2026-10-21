@@ -654,8 +654,6 @@ services:
       KULOFFICE_RECONCILIATION_WINDOW: 48h
       KULOFFICE_RECONCILIATION_GRACE: 1h
       KULOFFICE_RECONCILIATION_BATCH_SIZE: "100"
-      KULOFFICE_SANDBOX_LEDGER_MAX_CREDIT_MINOR: "1000000"
-      KULOFFICE_SANDBOX_LEDGER_MAX_BALANCE_MINOR: "10000000"
       # QR codes through Solange. Off until the key is set: `make solange-kulpay`
       # issues it (and the webhook secret) into .env.
       KULOFFICE_SOLANGE_BASE_URL: http://solange:8090
