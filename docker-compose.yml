@@ -128,7 +128,7 @@ services:
       # Postgres rather than start-dev's in-memory store: the realm and its
       # users survive a recreate, and stay in step with kuloffice's accounts.
       KC_DB: postgres
-      KC_DB_URL: jdbc:postgresql://db:5433/keycloak
+      KC_DB_URL: jdbc:postgresql://db:5432/keycloak
       KC_DB_USERNAME: keycloak
       KC_DB_PASSWORD: keycloak
     # The web login theme, kulpay, comes from the extension JAR: nothing may be
@@ -549,6 +549,8 @@ services:
         COPY next.config.ts tsconfig.json postcss.config.mjs vitest.config.mts vitest.setup.ts ./
         COPY messages ./messages
         COPY public ./public
+        # Shared test helpers (test/request-id.ts): the type check reads the tests too.
+        COPY test ./test
         COPY src ./src
         RUN npm run build
         FROM node:22-alpine3.20
@@ -573,6 +575,8 @@ services:
       KULPAY_KEYCLOAK_PASSKEY_CLIENT_ID: kulpay-web-passkey
       KULPAY_API_URL: ${API_URL:-http://localhost:18080}
       KULPAY_SESSION_SECRET: ${KULPAY_SESSION_SECRET:-}
+      # Where a phone opens the camera hand-off link (an HTTPS tunnel to :3000); empty: KULPAY_WEB_URL.
+      KULPAY_CAPTURE_URL: ${KULPAY_CAPTURE_URL:-}
 
   # The review portal (kulportal2): reviewers sign in to the workforce realm
   # and work kuloffice's review queue. http://localhost:${PORTAL_PORT}.
