@@ -269,6 +269,9 @@ services:
       KULPAY_AUDIT_SIGNING_KEY_ID: audit-1
       KULPAY_ADDR: ":9090"
       KULPAY_MGMT_ADDR: ":9091"
+      # A payment link may send the payer back to the KulPay web app once paid
+      # (?return=…); any other origin is dropped.
+      KULPAY_LINK_RETURN_ORIGINS: ${WEB_PUBLIC_URL}
       # The browser-visible origin: hosted checkout, payment links, docs and
       # OAuth redirects are built on it. Payments' own callback URLs come from
       # the caller (KulOffice), so containers still reach gateway:9090.
