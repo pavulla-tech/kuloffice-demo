@@ -1,9 +1,9 @@
 #!/bin/sh
 # A merchant's bindings on the Gateway, made from its Payment Acceptance
 # application in KulOffice (make merchant-bindings APP=pacapp_…): KulPay
-# balance, and for a live application M-Pesa at the PSP simulator.
-# KulOffice's database gives the application's account, environment, receiving
-# product (live) or sandbox destination (test) and the business's Gateway
+# balance in each mode (test: the Gateway's mock rail), and for a live
+# application M-Pesa at the PSP simulator. KulOffice's database gives the
+# application's account, environment, receiving product and the business's Gateway
 # tenant (set by IG-67 provisioning); the tools image then writes the binding
 # with the operator key. Secrets stay in .env and are never printed.
 set -eu
@@ -28,10 +28,15 @@ EOF
 
 [ "$status" = active ] || { echo "$app is $status, not active" >&2; exit 1; }
 [ -n "$tenant" ] || { echo "$app has no Gateway tenant yet: wait for provisioning (KULOFFICE_PAYMENT_ACCEPTANCE_PROVISIONING_ENABLED)" >&2; exit 1; }
-if [ "$environment" = test ]; then destination=$sandbox; else destination=$product; fi
-[ -n "$destination" ] || { echo "$app has no destination product: authorize one on its page first" >&2; exit 1; }
-
+# Test mode: the Gateway's mock rail for KulPay balance (no destination).
 $COMPOSE --profile tools run --rm --entrypoint python3 \
-  -e BINDING_APP="$app" -e BINDING_ACCOUNT="$account" -e BINDING_MODE="$environment" \
-  -e BINDING_PRODUCT="$destination" -e BINDING_TENANT="$tenant" \
+  -e BINDING_APP="$app" -e BINDING_ACCOUNT="$account" -e BINDING_MODE=test \
+  -e BINDING_PRODUCT=- -e BINDING_TENANT="$tenant" \
+  tools /tools/merchant_bindings.py
+# Live mode: KulPay balance into the application's first authorized product.
+[ "$environment" = live ] || exit 0
+[ -n "$product" ] || { echo "$app has no destination product: authorize one on its page first" >&2; exit 1; }
+$COMPOSE --profile tools run --rm --entrypoint python3 \
+  -e BINDING_APP="$app" -e BINDING_ACCOUNT="$account" -e BINDING_MODE=live \
+  -e BINDING_PRODUCT="$product" -e BINDING_TENANT="$tenant" \
   tools /tools/merchant_bindings.py

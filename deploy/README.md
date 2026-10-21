@@ -109,6 +109,50 @@ to the server's `deploy/` and run `make load FILE=kulpay-images-….tar.gz`
 there before setting `GATEWAY_TAG` / `SIMULATOR_TAG`. A deploy refuses a
 `localhost/` tag that is not loaded.
 
+### PSP onboarding and the simulator's Gateway connection
+
+PSPs apply at `GATEWAY_PUBLIC_URL/onboarding` (on the development server,
+`https://gateway.kulpay.pavulla.com/onboarding`). The Gateway keeps its own
+onboarding lifecycle, KYB review, technical setup, certification, pilot and
+go-live; this is not a KulOffice or simulator form.
+
+Application confirmations and partner-portal sign-in links use the Gateway's
+notification outbox. Configure `KULPAY_SMTP_ADDR`, `KULPAY_SMTP_FROM`,
+`KULPAY_SMTP_USERNAME` and `KULPAY_SMTP_PASSWORD` in the server's ignored
+`deploy/.env`, then recreate the Gateway with `make restart S=gateway`. The
+relay takes PLAIN auth over STARTTLS (normally port 587) or implicit TLS on
+port 465 (gateway v0.1.1-alpha07 on). Verify with
+`docker compose --env-file .env logs gateway` that there is no
+`no mail relay configured` warning and no SMTP delivery error.
+
+The simulator has two distinct Gateway relationships:
+
+- its provider endpoints are already bound by `gateway-bind` for KulPay's own
+  payments; the successful `bound mpesa/emola/card` output confirms that link;
+- its Partner Bank workbench needs a PSP's own key. Once the enrolled PSP
+  reaches technical setup, reveal its sandbox key once, save it as
+  `SIMULATOR_GATEWAY_PARTNER_KEY` with `SIMULATOR_GATEWAY_MODE=test`, and
+  recreate the simulator with `make restart S=simulator`. Until then, the
+  workbench's “Gateway not configured” state is expected and does not mean the
+  provider bindings are broken.
+
+### Partner cash deposits (development)
+
+`make cash-deposits` makes a partner's cash deposit credit the KulPay account
+it was taken for: it generates the lookup secrets if missing, recreates the
+gateway with `gateway/launch_matrix.json` (the embedded matrix plus live cash
+deposits, owner 2026-10-20), turns on `cash_in_incoming` for KulOffice's
+gateway account, provisions KulOffice's event endpoint and sets
+`KULOFFICE_INCOMING_TRANSFERS_ENABLED=true`. KulOffice credits live deposits
+only (test-mode ones are ignored), and its test-mode lookup answers only the
+sandbox references `841000001` (found) and `841000410` (closed).
+
+The partner side is the PSP's: a capability matrix with a `NAME_LOOKUP` row for
+`cash_deposit` (approved in the dashboard), a live key (issued at pilot) set as
+`SIMULATOR_GATEWAY_PARTNER_KEY` with `SIMULATOR_GATEWAY_MODE=live`, and a
+statement profile for the receiving account (`SIMULATOR_STATEMENT_PROFILE_ID`),
+since a deposit is credited only when the statement shows it.
+
 **3. Apache.** For each file in `apache/`: get its certificate (`certbot
 certonly --apache -d <host>`), copy it to `/etc/apache2/sites-available/`,
 `a2ensite`, then `systemctl reload apache2`. Once:
@@ -149,7 +193,14 @@ make operator EMAIL=ana@pavulla.com FIRST=Ana LAST=Macuacua                 # a 
 make operator EMAIL=rui@pavulla.com FIRST=Rui LAST=Lopes SOLANGE=developer   # also in Solange
 make operator EMAIL=eva@pavulla.com FIRST=Eva LAST=Sitoe ROLE= SOLANGE=viewer # Solange only
 make operator EMAIL=ze@pavulla.com FIRST=Zé LAST=Tembe ROLE=ADMIN SOLANGE=admin  # an admin, everywhere
+make operator EMAIL=lia@pavulla.com FIRST=Lia LAST=Cossa ROLE= GATEWAY=1        # the Gateway dashboard only
 ```
+
+- **`GATEWAY=1`:** the Gateway operator dashboard (`https://mgnt.kulpay.pavulla.com/admin/`).
+  Turn its sign-in on once: `GATEWAY_OIDC_ENABLED=true` in `.env`, then
+  `make gateway-signin` (its client in the workforce realm, the generated secrets, the
+  gateway recreated). Each operator signs in as themselves, so the Gateway's four-eyes
+  approvals need two people with the role. The development admin gets it on every deploy.
 
 - **The account:** a workforce account with a temporary password (printed
   once, changed at the first sign-in).

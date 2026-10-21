@@ -1,7 +1,8 @@
 """Write a merchant's bindings on the Gateway (scripts/merchant-bindings.sh).
 
-KulPay balance calls KulOffice as the Gateway's service client and verifies
-KulOffice's signed checkout wake-ups with the mode's signing secret (IG-45).
+In live mode KulPay balance calls KulOffice as the Gateway's service client
+and verifies KulOffice's signed checkout wake-ups (IG-45); in test mode it is
+the Gateway's mock rail, so test payments never reach KulOffice.
 A live application also gets M-Pesa at the PSP simulator, configured as the
 simulator's own `bind` does for KulOffice's account (dev servers only).
 Nothing secret is printed: only each binding's id, mode and callback path.
@@ -32,7 +33,14 @@ def main():
     mode = need("BINDING_MODE")
     if mode not in ("live", "test"):
         sys.exit(f"unknown environment {mode}")
-    wakeup = "KULOFFICE_CHECKOUT_PROVIDER_WAKEUP_SIGNING_SECRETS" if mode == "live" else "KULOFFICE_CHECKOUT_PROVIDER_WAKEUP_TEST_SIGNING_SECRETS"
+    if mode == "test":
+        # Test mode is the Gateway's own: KulPay balance is its mock rail
+        # (succeeds unless the request names a failure scenario), like every
+        # other method in test mode. KulOffice is never called for it.
+        save({"account_id": need("BINDING_TENANT"), "mode": "test", "method": "kulpay_balance", "driver": "mock",
+              "label": "KulPay balance (test)", "enabled": True, "config": {}})
+        return
+    wakeup = "KULOFFICE_CHECKOUT_PROVIDER_WAKEUP_SIGNING_SECRETS"
     body = {
         "account_id": need("BINDING_TENANT"),
         "mode": mode,

@@ -20,7 +20,7 @@ set_env() {
 }
 
 # The tools image's entrypoint is sh, so python3 is the entrypoint here.
-result=$($COMPOSE --profile tools run --rm --entrypoint python3 tools /tools/gateway_kuloffice.py)
+result=$($COMPOSE --profile tools run --rm -e GATEWAY_CASH_IN_INCOMING="${GATEWAY_CASH_IN_INCOMING:-}" --entrypoint python3 tools /tools/gateway_kuloffice.py)
 if [ -n "$result" ]; then
   printf '%s\n' "$result" | while IFS='=' read -r key value; do
     case "$key" in

@@ -23,6 +23,11 @@ HAVE_SERVICE_SECRET = bool(os.environ.get("KULOFFICE_PAYMENT_ACCEPTANCE_WEBHOOK_
 # KulOffice's account endpoint: its incoming transfers, and its businesses'
 # bills, KulOffice being their Gateway biller.
 ACCOUNT_EVENTS = ["incoming_transfer.*", "bill_invoice.*", "bill_remittance.*"]
+ACCOUNT_ID = os.environ.get("GATEWAY_ACCOUNT_ID", "")
+# GATEWAY_CASH_IN_INCOMING=1 (make cash-deposits): a cash deposit a partner
+# takes for one of KulOffice's references is also recorded as an incoming
+# transfer to KulOffice, which credits the customer.
+CASH_IN_INCOMING = os.environ.get("GATEWAY_CASH_IN_INCOMING", "") == "1"
 
 
 def request(method, path, key, body=None):
@@ -150,6 +155,13 @@ def ensure_service_sink():
     return secret
 
 
+def ensure_cash_in_incoming():
+    if not ACCOUNT_ID:
+        raise RuntimeError("GATEWAY_ACCOUNT_ID is required to take cash deposits")
+    request("PUT", f"/admin/accounts/{ACCOUNT_ID}/cash-in-incoming", ADMIN_KEY, {"enabled": True})
+    print("cash deposits for KulOffice's references are recorded as incoming transfers", file=sys.stderr)
+
+
 def main():
     if not ACCOUNT_KEY or not ADMIN_KEY:
         sys.exit("GATEWAY_API_KEY and GATEWAY_ADMIN_KEY are required")
@@ -157,6 +169,8 @@ def main():
         sys.exit("GATEWAY_MODE must be live or test")
     incoming = ensure_incoming_endpoint()
     service = ensure_service_sink()
+    if CASH_IN_INCOMING:
+        ensure_cash_in_incoming()
     if incoming:
         print("KULOFFICE_INCOMING_TRANSFERS_WEBHOOK_SECRETS=" + incoming)
     if service:
