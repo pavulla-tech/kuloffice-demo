@@ -368,6 +368,10 @@ services:
       BIND_CALLBACK_SECRET: ${SIMULATOR_CALLBACK_SECRET:-simulator-callback-secret}
       BIND_STRIPE_WEBHOOK_SECRET: ${SIMULATOR_STRIPE_WEBHOOK_SECRET:-whsec_simulator_gateway}
       BIND_MODE: live
+      # The methods pointed at the simulator. A live test with real M-Pesa and
+      # e-Mola (their bindings set in the Gateway's Connectors page) sets
+      # SIMULATOR_BIND_METHODS=card, so a deploy never puts them back.
+      BIND_METHODS: ${SIMULATOR_BIND_METHODS:-mpesa emola card}
 
   # Development only: plays M-Pesa, e-Mola and the card acquirer, and their
   # customers. Its page (SIMULATOR_PUBLIC_URL) is where someone approves or
