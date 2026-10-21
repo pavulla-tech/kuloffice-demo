@@ -231,7 +231,8 @@ services:
 
   minio:
     profiles: ["kuloffice"]
-    image: minio/minio:RELEASE.2024-08-17T01-24-54Z
+    # image: minio/minio:RELEASE.2024-08-17T01-24-54Z
+    image: developerspavs/kulpay-minio:2026.10.02-1
     restart: unless-stopped
     command: ["server", "/data", "--console-address", ":9001"]
     environment:
@@ -252,7 +253,8 @@ services:
   # submission is accepted, and its lifecycle rule removes what never is.
   minio-init:
     profiles: ["kuloffice"]
-    image: minio/mc:RELEASE.2024-08-17T11-33-50Z
+    # image: minio/mc:RELEASE.2024-08-17T11-33-50Z
+    image: developerspavs/kulpay-mc:2026.10.02-1
     depends_on:
       minio: { condition: service_healthy }
     environment:
@@ -547,6 +549,8 @@ services:
         COPY next.config.ts tsconfig.json postcss.config.mjs vitest.config.mts vitest.setup.ts ./
         COPY messages ./messages
         COPY public ./public
+        # Shared test helpers (test/request-id.ts): the type check reads the tests too.
+        COPY test ./test
         COPY src ./src
         RUN npm run build
         FROM node:22-alpine3.20
@@ -571,6 +575,8 @@ services:
       KULPAY_KEYCLOAK_PASSKEY_CLIENT_ID: kulpay-web-passkey
       KULPAY_API_URL: ${API_URL:-http://localhost:18080}
       KULPAY_SESSION_SECRET: ${KULPAY_SESSION_SECRET:-}
+      # Where a phone opens the camera hand-off link (an HTTPS tunnel to :3000); empty: KULPAY_WEB_URL.
+      KULPAY_CAPTURE_URL: ${KULPAY_CAPTURE_URL:-}
 
   # The review portal (kulportal2): reviewers sign in to the workforce realm
   # and work kuloffice's review queue. http://localhost:${PORTAL_PORT}.
