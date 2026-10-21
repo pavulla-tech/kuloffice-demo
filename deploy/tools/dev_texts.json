@@ -33,6 +33,7 @@
     {"event": "orientu.cause_more_info", "channel": "inbox", "text": "A revisão da causa \"{reason}\" precisa de mais informação: {note}"},
     {"event": "orientu.cause_rejected", "channel": "inbox", "text": "A causa \"{reason}\" não foi aprovada. {note}"},
     {"event": "orientu.cause_published", "channel": "inbox", "text": "A causa \"{reason}\" foi publicada. Referência: {reference}."},
+    {"event": "orientu.cause_announced", "channel": "inbox", "text": "Nova causa: \"{reason}\". Veja-a em Causas e ajude se puder."},
     {"event": "orientu.cause_suspended", "channel": "inbox", "text": "A causa \"{reason}\" foi suspensa. Não recebe contribuições por agora."},
     {"event": "orientu.cause_reinstated", "channel": "inbox", "text": "A causa \"{reason}\" está publicada de novo."},
     {"event": "orientu.cause_closed", "channel": "inbox", "text": "A causa \"{reason}\" foi encerrada. {note}"},
