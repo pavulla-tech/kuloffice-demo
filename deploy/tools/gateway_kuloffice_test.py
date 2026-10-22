@@ -69,7 +69,9 @@ class ProvisioningTest(unittest.TestCase):
         self.assertNotIn("service-new", stderr)
         incoming_create = next(call for call in fake.calls if call[:2] == ("POST", "/webhook-endpoints"))
         self.assertEqual(incoming_create[2], "account-key")
-        self.assertEqual(incoming_create[3]["event_types"], ["incoming_transfer.*", "bill_invoice.*", "bill_remittance.*"])
+        self.assertEqual(
+            incoming_create[3]["event_types"], ["incoming_transfer.*", "bill_invoice.*", "bill_remittance.*", "bill_subscription.*"]
+        )
         sink_create = next(call for call in fake.calls if call[:2] == ("POST", "/admin/service-event-sinks"))
         self.assertEqual(sink_create[2], "admin-key")
         self.assertEqual(sink_create[3]["event_types"], ["payment.*"])
@@ -124,7 +126,9 @@ class AccountEventsTest(unittest.TestCase):
         with contextlib.redirect_stderr(io.StringIO()):
             gateway.ensure_incoming_endpoint()
         created = [c for c in fake.calls if c[0] == "POST" and c[1] == "/webhook-endpoints"][0]
-        self.assertEqual(created[3]["event_types"], ["incoming_transfer.*", "bill_invoice.*", "bill_remittance.*"])
+        self.assertEqual(
+            created[3]["event_types"], ["incoming_transfer.*", "bill_invoice.*", "bill_remittance.*", "bill_subscription.*"]
+        )
 
     def test_an_existing_endpoint_is_subscribed_to_the_bills_events(self):
         fake = FakeGateway(incoming={"id": "wh_1", "mode": "live", "url": gateway.URL, "status": "active", "event_types": ["incoming_transfer.*"]})
@@ -133,7 +137,9 @@ class AccountEventsTest(unittest.TestCase):
             gateway.ensure_incoming_endpoint()
         patched = [c for c in fake.calls if c[0] == "PATCH"]
         self.assertEqual(len(patched), 1)
-        self.assertEqual(patched[0][3]["event_types"], ["bill_invoice.*", "bill_remittance.*", "incoming_transfer.*"])
+        self.assertEqual(
+            patched[0][3]["event_types"], ["bill_invoice.*", "bill_remittance.*", "bill_subscription.*", "incoming_transfer.*"]
+        )
 
     def test_an_endpoint_with_everything_is_left_alone(self):
         fake = FakeGateway(incoming={"id": "wh_1", "mode": "live", "url": gateway.URL, "status": "active", "event_types": ["*"]})

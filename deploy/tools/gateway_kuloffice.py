@@ -20,9 +20,11 @@ MODE = os.environ.get("GATEWAY_MODE", "live")
 URL = os.environ.get("GATEWAY_KULOFFICE_EVENT_URL", "http://kuloffice:8080/v1/integrations/kulpay-gateway/events")
 HAVE_INCOMING_SECRET = bool(os.environ.get("KULOFFICE_INCOMING_TRANSFERS_WEBHOOK_SECRETS", "").strip())
 HAVE_SERVICE_SECRET = bool(os.environ.get("KULOFFICE_PAYMENT_ACCEPTANCE_WEBHOOK_SECRETS", "").strip())
-# KulOffice's account endpoint: its incoming transfers, and its businesses'
-# bills, KulOffice being their Gateway biller.
-ACCOUNT_EVENTS = ["incoming_transfer.*", "bill_invoice.*", "bill_remittance.*"]
+# KulOffice's account endpoint: its incoming transfers, its businesses'
+# bills (KulOffice being their Gateway biller), and its payers' biller
+# accounts (other billers offered to KulPay customers; their bills are
+# bill_invoice.delivered and .reminded).
+ACCOUNT_EVENTS = ["incoming_transfer.*", "bill_invoice.*", "bill_remittance.*", "bill_subscription.*"]
 ACCOUNT_ID = os.environ.get("GATEWAY_ACCOUNT_ID", "")
 # GATEWAY_CASH_IN_INCOMING=1 (make cash-deposits): a cash deposit a partner
 # takes for one of KulOffice's references is also recorded as an incoming
