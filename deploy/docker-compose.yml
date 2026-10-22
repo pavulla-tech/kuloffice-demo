@@ -271,6 +271,9 @@ services:
       # without a valid kulpay-payments licence. Optional here for the same
       # reason as the audit key: the gateway itself names what is missing.
       KULPAY_LICENSE_KEY: ${GATEWAY_LICENSE_KEY:-}
+      # Bills KulOffice presents name their business and its logo, which
+      # KulOffice serves; the Gateway's pages show images from these origins.
+      KULPAY_IMAGE_ORIGINS: ${KULOFFICE_PUBLIC_URL:-}
       KULPAY_ADDR: ":9090"
       KULPAY_MGMT_ADDR: ":9091"
       # A payment link may send the payer back to the KulPay web app once paid
