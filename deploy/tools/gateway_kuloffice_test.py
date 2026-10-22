@@ -36,6 +36,8 @@ class FakeGateway:
             return 200, {**self.sink, **(body or {})}
         if method == "POST" and path.endswith("/roll-secret") and path.startswith("/admin/service-event-sinks/"):
             return 200, {"secret": "service-rolled"}
+        if method == "POST" and path.startswith("/admin/accounts/") and path.endswith("/keys"):
+            return 201, {"key": {"id": "key_1", "secret": "partners-new"}}
         raise AssertionError((method, path, body))
 
 
@@ -70,7 +72,7 @@ class ProvisioningTest(unittest.TestCase):
         incoming_create = next(call for call in fake.calls if call[:2] == ("POST", "/webhook-endpoints"))
         self.assertEqual(incoming_create[2], "account-key")
         self.assertEqual(
-            incoming_create[3]["event_types"], ["incoming_transfer.*", "bill_invoice.*", "bill_remittance.*", "bill_subscription.*"]
+            incoming_create[3]["event_types"], ["incoming_transfer.*", "bill_invoice.*", "bill_remittance.*", "bill_subscription.*", "biller.integration_status", "biller.technical_contact_replaced"]
         )
         sink_create = next(call for call in fake.calls if call[:2] == ("POST", "/admin/service-event-sinks"))
         self.assertEqual(sink_create[2], "admin-key")
@@ -127,7 +129,7 @@ class AccountEventsTest(unittest.TestCase):
             gateway.ensure_incoming_endpoint()
         created = [c for c in fake.calls if c[0] == "POST" and c[1] == "/webhook-endpoints"][0]
         self.assertEqual(
-            created[3]["event_types"], ["incoming_transfer.*", "bill_invoice.*", "bill_remittance.*", "bill_subscription.*"]
+            created[3]["event_types"], ["incoming_transfer.*", "bill_invoice.*", "bill_remittance.*", "bill_subscription.*", "biller.integration_status", "biller.technical_contact_replaced"]
         )
 
     def test_an_existing_endpoint_is_subscribed_to_the_bills_events(self):
@@ -138,7 +140,9 @@ class AccountEventsTest(unittest.TestCase):
         patched = [c for c in fake.calls if c[0] == "PATCH"]
         self.assertEqual(len(patched), 1)
         self.assertEqual(
-            patched[0][3]["event_types"], ["bill_invoice.*", "bill_remittance.*", "bill_subscription.*", "incoming_transfer.*"]
+            patched[0][3]["event_types"],
+            ["bill_invoice.*", "bill_remittance.*", "bill_subscription.*", "biller.integration_status", "biller.technical_contact_replaced",
+             "incoming_transfer.*"]
         )
 
     def test_an_endpoint_with_everything_is_left_alone(self):
@@ -147,6 +151,49 @@ class AccountEventsTest(unittest.TestCase):
         with contextlib.redirect_stderr(io.StringIO()):
             gateway.ensure_incoming_endpoint()
         self.assertEqual([c for c in fake.calls if c[0] == "PATCH"], [])
+
+
+class PartnersKeyTest(unittest.TestCase):
+    def setUp(self):
+        gateway.ACCOUNT_KEY = "account-key"
+        gateway.ADMIN_KEY = "admin-key"
+        gateway.MODE = "live"
+        gateway.URL = "http://kuloffice:8080/v1/integrations/kulpay-gateway/events"
+        gateway.ACCOUNT_ID = "acc_kuloffice"
+        gateway.HAVE_INCOMING_SECRET = True
+        gateway.HAVE_SERVICE_SECRET = True
+
+    def run_main(self, fake):
+        gateway.request = fake
+        stdout, stderr = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+            gateway.main()
+        return stdout.getvalue(), stderr.getvalue()
+
+    def test_issues_the_partners_key_once_on_kuloffices_account(self):
+        gateway.BILLER_PROVISIONING, gateway.HAVE_PARTNERS_KEY = True, False
+        fake = FakeGateway(
+            incoming={"id": "wh_1", "mode": "live", "url": gateway.URL, "status": "active", "event_types": ["*"]},
+            sink={"id": "sink_1", "mode": "live", "url": gateway.URL, "enabled": True, "event_types": ["payment.*"]},
+        )
+        stdout, stderr = self.run_main(fake)
+        self.assertEqual(stdout.splitlines(), ["KULOFFICE_BILLER_PROVISIONING_GATEWAY_API_KEY=partners-new"])
+        self.assertNotIn("partners-new", stderr)
+        issued = next(c for c in fake.calls if c[1] == "/admin/accounts/acc_kuloffice/keys")
+        self.assertEqual(issued[2], "admin-key")
+        self.assertEqual(issued[3]["scopes"], ["service:partners:write"])
+
+        gateway.HAVE_PARTNERS_KEY = True
+        fake = FakeGateway(
+            incoming={"id": "wh_1", "mode": "live", "url": gateway.URL, "status": "active", "event_types": ["*"]},
+            sink={"id": "sink_1", "mode": "live", "url": gateway.URL, "enabled": True, "event_types": ["payment.*"]},
+        )
+        stdout, _ = self.run_main(fake)
+        self.assertEqual(stdout, "")
+        self.assertFalse(any(c[1].startswith("/admin/accounts/") for c in fake.calls))
+
+    def tearDown(self):
+        gateway.BILLER_PROVISIONING, gateway.HAVE_PARTNERS_KEY = False, False
 
 
 if __name__ == "__main__":

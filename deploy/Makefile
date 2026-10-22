@@ -6,7 +6,7 @@
 .PHONY: help setup sync-env clean-env-backups config check-images \
         images push bundle load theme license \
         start start-portal stop restart logs ps update clean reset-blnk \
-        init operator gateway-signin solange-kulpay gateway-kuloffice cash-deposits \
+        init operator gateway-signin solange-kulpay gateway-kuloffice cash-deposits gateway-billers \
         deploy rollback releases status health backup restore
 
 ENV_FILE ?= .env
@@ -57,6 +57,7 @@ help:
 	@echo "  make gateway-kuloffice  Gateway event endpoints and signing secrets for KulOffice"
 	@echo "  make platform-wallet    KulPay balance at the Gateway checkout for KulPay's own purchases"
 	@echo "  make cash-deposits      partner cash deposits credit KulPay accounts (live; dev only)"
+	@echo "  make gateway-billers    billers approved in the back office provisioned at the Gateway"
 	@echo "  make operator EMAIL=… FIRST=… LAST=… [ROLE=Revisores|ADMIN] [SOLANGE=viewer,developer] [GATEWAY=1]"
 	@echo "                          ROLE=ADMIN: the Administradores role (every kuloffice permission)"
 	@echo "                          a staff account; ROLE= (empty) for Solange only"
@@ -255,6 +256,14 @@ cash-deposits:
 	else echo 'KULOFFICE_INCOMING_TRANSFERS_ENABLED=true' >> $(ENV_FILE); fi
 	$(COMPOSE) up -d --wait --force-recreate gateway
 	@GATEWAY_CASH_IN_INCOMING=1 ENV_FILE=$(ENV_FILE) COMPOSE="docker compose --env-file $(ENV_FILE)" sh scripts/gateway-kuloffice.sh
+
+# Billers approved in the back office are provisioned at the Gateway as
+# LSPs (KO-1): the partners key is issued on KulOffice's account, KulOffice's
+# webhook takes the billers' events, and provisioning is switched on. It
+# needs incoming transfers on (make cash-deposits, or the setting).
+gateway-billers:
+	@grep -q '^KULOFFICE_INCOMING_TRANSFERS_ENABLED=true' $(ENV_FILE) || { echo "turn incoming transfers on first (KULOFFICE_INCOMING_TRANSFERS_ENABLED=true): the billers' status comes on its webhook" >&2; exit 1; }
+	@GATEWAY_BILLER_PROVISIONING=1 ENV_FILE=$(ENV_FILE) COMPOSE="docker compose --env-file $(ENV_FILE)" sh scripts/gateway-kuloffice.sh
 
 # ROLE=ADMIN: an admin, holding every permission in kuloffice's catalogue.
 ROLE ?= Revisores

@@ -617,6 +617,11 @@ services:
       KULOFFICE_INCOMING_TRANSFERS_GATEWAY_ACCOUNT_ID: ${GATEWAY_ACCOUNT_ID}
       KULOFFICE_INCOMING_TRANSFERS_WEBHOOK_SECRETS: ${KULOFFICE_INCOMING_TRANSFERS_WEBHOOK_SECRETS:-}
       KULOFFICE_INCOMING_TRANSFERS_POLL_INTERVAL: 5m
+      # Billers approved in the back office provisioned at the Gateway as
+      # LSPs (KO-1); `make gateway-billers` issues the partners key and
+      # switches it on. It needs incoming transfers on (their webhook).
+      KULOFFICE_BILLER_PROVISIONING_ENABLED: ${KULOFFICE_BILLER_PROVISIONING_ENABLED:-false}
+      KULOFFICE_BILLER_PROVISIONING_GATEWAY_API_KEY: ${KULOFFICE_BILLER_PROVISIONING_GATEWAY_API_KEY:-}
       KULOFFICE_INCOMING_TRANSFERS_MAX_CAPACITY: "2"
       # The Gateway's cash-deposit reference lookup (the same pair as its
       # kulpay_cms connector); both set turn POST /v1/beneficiaries/lookup on.

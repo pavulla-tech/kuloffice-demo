@@ -21,15 +21,22 @@ URL = os.environ.get("GATEWAY_KULOFFICE_EVENT_URL", "http://kuloffice:8080/v1/in
 HAVE_INCOMING_SECRET = bool(os.environ.get("KULOFFICE_INCOMING_TRANSFERS_WEBHOOK_SECRETS", "").strip())
 HAVE_SERVICE_SECRET = bool(os.environ.get("KULOFFICE_PAYMENT_ACCEPTANCE_WEBHOOK_SECRETS", "").strip())
 # KulOffice's account endpoint: its incoming transfers, its businesses'
-# bills (KulOffice being their Gateway biller), and its payers' biller
+# bills (KulOffice being their Gateway biller), its payers' biller
 # accounts (other billers offered to KulPay customers; their bills are
-# bill_invoice.delivered and .reminded).
-ACCOUNT_EVENTS = ["incoming_transfer.*", "bill_invoice.*", "bill_remittance.*", "bill_subscription.*"]
+# bill_invoice.delivered and .reminded), and the billers it provisions as
+# LSPs (their technical status and technical contact, KO-1/KO-2).
+ACCOUNT_EVENTS = ["incoming_transfer.*", "bill_invoice.*", "bill_remittance.*", "bill_subscription.*",
+                  "biller.integration_status", "biller.technical_contact_replaced"]
 ACCOUNT_ID = os.environ.get("GATEWAY_ACCOUNT_ID", "")
 # GATEWAY_CASH_IN_INCOMING=1 (make cash-deposits): a cash deposit a partner
 # takes for one of KulOffice's references is also recorded as an incoming
 # transfer to KulOffice, which credits the customer.
 CASH_IN_INCOMING = os.environ.get("GATEWAY_CASH_IN_INCOMING", "") == "1"
+# GATEWAY_BILLER_PROVISIONING=1 (make gateway-billers): the partners key
+# KulOffice provisions approved billers with (service:partners:write, an
+# operator-only scope, issued by the admin key on KulOffice's own account).
+BILLER_PROVISIONING = os.environ.get("GATEWAY_BILLER_PROVISIONING", "") == "1"
+HAVE_PARTNERS_KEY = bool(os.environ.get("KULOFFICE_BILLER_PROVISIONING_GATEWAY_API_KEY", "").strip())
 
 
 def request(method, path, key, body=None):
@@ -164,6 +171,27 @@ def ensure_cash_in_incoming():
     print("cash deposits for KulOffice's references are recorded as incoming transfers", file=sys.stderr)
 
 
+def ensure_partners_key():
+    """Issues KulOffice's partners key once; an existing one is kept."""
+    if HAVE_PARTNERS_KEY:
+        print("partners key already set", file=sys.stderr)
+        return ""
+    if not ACCOUNT_ID:
+        raise RuntimeError("GATEWAY_ACCOUNT_ID is required to issue the partners key")
+    _, created = request(
+        "POST",
+        f"/admin/accounts/{ACCOUNT_ID}/keys",
+        ADMIN_KEY,
+        {"name": "kuloffice-partners", "scopes": ["service:partners:write"]},
+    )
+    key = created.get("key", {}) if isinstance(created, dict) else {}
+    secret = key.get("secret", "")
+    if not secret:
+        raise RuntimeError("Gateway issued the partners key without returning its secret")
+    print("partners key issued", file=sys.stderr)
+    return secret
+
+
 def main():
     if not ACCOUNT_KEY or not ADMIN_KEY:
         sys.exit("GATEWAY_API_KEY and GATEWAY_ADMIN_KEY are required")
@@ -173,10 +201,13 @@ def main():
     service = ensure_service_sink()
     if CASH_IN_INCOMING:
         ensure_cash_in_incoming()
+    partners = ensure_partners_key() if BILLER_PROVISIONING else ""
     if incoming:
         print("KULOFFICE_INCOMING_TRANSFERS_WEBHOOK_SECRETS=" + incoming)
     if service:
         print("KULOFFICE_PAYMENT_ACCEPTANCE_WEBHOOK_SECRETS=" + service)
+    if partners:
+        print("KULOFFICE_BILLER_PROVISIONING_GATEWAY_API_KEY=" + partners)
 
 
 if __name__ == "__main__":
