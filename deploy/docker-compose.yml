@@ -267,6 +267,10 @@ services:
       # (bin/kulpay secrets does it now).
       KULPAY_AUDIT_SIGNING_KEY: ${GATEWAY_AUDIT_SIGNING_KEY:-}
       KULPAY_AUDIT_SIGNING_KEY_ID: audit-1
+      # From v0.1.1-alpha14 the gateway does not start, and answers nothing,
+      # without a valid kulpay-payments licence. Optional here for the same
+      # reason as the audit key: the gateway itself names what is missing.
+      KULPAY_LICENSE_KEY: ${GATEWAY_LICENSE_KEY:-}
       KULPAY_ADDR: ":9090"
       KULPAY_MGMT_ADDR: ":9091"
       # A payment link may send the payer back to the KulPay web app once paid
