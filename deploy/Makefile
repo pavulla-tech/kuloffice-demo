@@ -5,7 +5,7 @@
 
 .PHONY: help setup sync-env clean-env-backups config check-images \
         images push bundle load theme license \
-        start start-portal stop restart logs ps update clean reset-blnk \
+        start start-portal start-website stop restart logs ps update clean reset-blnk \
         init operator gateway-signin solange-kulpay gateway-kuloffice cash-deposits gateway-billers \
         deploy rollback releases status health backup restore
 
@@ -37,6 +37,7 @@ help:
 	@echo "Run (on the server)"
 	@echo "  make start              start the stack"
 	@echo "  make start-portal       also start kulportal (needs KULPORTAL_TAG)"
+	@echo "  make start-website      also start the website (needs WEBSITE_TAG)"
 	@echo "  make stop / ps / logs [S=x]"
 	@echo "  make restart [S=x]      recreate everything, or one service (reloads .env)"
 	@echo "  make update             pull the tags in .env and recreate what changed"
@@ -86,7 +87,7 @@ config: check-images
 	$(COMPOSE) config --quiet && echo "configuration is complete"
 
 check-images:
-	@sh scripts/check-image-refs.sh "$(ENV_FILE)" $(IMAGES) MINIO MC
+	@sh scripts/check-image-refs.sh "$(ENV_FILE)" $(IMAGES) KULPORTAL WEBSITE MINIO MC
 
 # ── images (laptop) ───────────────────────────────────────────────────────────
 
@@ -110,6 +111,9 @@ build_TOOLS           = docker build --platform $$TARGET_PLATFORM -t "$$TOOLS_IM
 build_SOLANGE         = docker build --platform $$TARGET_PLATFORM -t "$$SOLANGE_IMAGE:$$SOLANGE_TAG" -f images/solange.Dockerfile "$$SOLANGE_DIR"
 build_SOLANGE_CONSOLE = docker build --platform $$TARGET_PLATFORM -t "$$SOLANGE_CONSOLE_IMAGE:$$SOLANGE_CONSOLE_TAG" -f images/solange-console.Dockerfile "$$SOLANGE_DIR/console"
 build_KULPORTAL       = docker build --platform $$TARGET_PLATFORM -t "$$KULPORTAL_IMAGE:$$KULPORTAL_TAG" "$$KULPORTAL_DIR"
+# The website's links and social cards carry its public address.
+build_WEBSITE         = docker build --platform $$TARGET_PLATFORM -t "$$WEBSITE_IMAGE:$$WEBSITE_TAG" -f images/website.Dockerfile \
+	  --build-arg BASE_URL="$$WEBSITE_PUBLIC_URL/" "$$WEBSITE_DIR"
 # The payments gateway and the PSP simulator build from their repositories' own
 # Dockerfiles.
 build_GATEWAY         = docker build --platform $$TARGET_PLATFORM -t "$$GATEWAY_IMAGE:$$GATEWAY_TAG" "$$GATEWAY_DIR"
@@ -123,7 +127,7 @@ images: check-images
 		case $$name in \
 		KEYCLOAK) $(build_KEYCLOAK) ;; KULOFFICE) $(build_KULOFFICE) ;; WEB) $(build_WEB) ;; \
 		FILESERVER) $(build_FILESERVER) ;; TOKEN_PANEL) $(build_TOKEN_PANEL) ;; TOOLS) $(build_TOOLS) ;; \
-		SOLANGE) $(build_SOLANGE) ;; SOLANGE_CONSOLE) $(build_SOLANGE_CONSOLE) ;; KULPORTAL) $(build_KULPORTAL) ;; \
+		SOLANGE) $(build_SOLANGE) ;; SOLANGE_CONSOLE) $(build_SOLANGE_CONSOLE) ;; KULPORTAL) $(build_KULPORTAL) ;; WEBSITE) $(build_WEBSITE) ;; \
 		GATEWAY) $(build_GATEWAY) ;; SIMULATOR) $(build_SIMULATOR) ;; \
 		*) echo "unknown image $$name" >&2; exit 1 ;; \
 		esac; \
@@ -177,8 +181,12 @@ start-portal: check-images
 	@set -a; . ./$(ENV_FILE); set +a; [ -n "$${KULPORTAL_TAG:-}" ] || { echo "KULPORTAL_TAG is empty in $(ENV_FILE)" >&2; exit 1; }
 	$(COMPOSE) --profile portal up -d
 
+start-website: check-images
+	@set -a; . ./$(ENV_FILE); set +a; [ -n "$${WEBSITE_TAG:-}" ] || { echo "WEBSITE_TAG is empty in $(ENV_FILE)" >&2; exit 1; }
+	$(COMPOSE) --profile website up -d website
+
 stop:
-	$(COMPOSE) --profile portal down
+	$(COMPOSE) --profile portal --profile website down
 
 # Recreates: a plain restart keeps a container's old environment.
 restart:
@@ -190,10 +198,10 @@ F ?= 1
 N ?= 200
 SINCE ?=
 logs:
-	$(COMPOSE) --profile portal logs $(if $(filter 1,$(F)),-f) --tail=$(N) $(if $(SINCE),--since $(SINCE)) $(S)
+	$(COMPOSE) --profile portal --profile website logs $(if $(filter 1,$(F)),-f) --tail=$(N) $(if $(SINCE),--since $(SINCE)) $(S)
 
 ps:
-	$(COMPOSE) --profile portal ps -a
+	$(COMPOSE) --profile portal --profile website ps -a
 
 update: check-images
 	$(COMPOSE) pull --ignore-pull-failures

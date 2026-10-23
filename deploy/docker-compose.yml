@@ -719,6 +719,15 @@ services:
     ports:
       - "127.0.0.1:${WEB_PORT:-9380}:3000"
 
+  # The KulPay website: static pages (Hugo) behind nginx. Off until
+  # `make start-website` (profile `website`).
+  website:
+    <<: *restart
+    profiles: ["website"]
+    image: ${WEBSITE_IMAGE:-developerspavs/kulpay-website}:${WEBSITE_TAG:-unset}
+    ports:
+      - "127.0.0.1:${WEBSITE_PORT:-8080}:80"
+
   # Signs numbers and staff in and keeps their tokens fresh. It holds live
   # tokens: Apache must put a password in front of it (apache/panel.conf).
   token-panel:

@@ -11,6 +11,7 @@ The whole of KulPay on one server, in one compose stack:
 | `solange` | https://qr.kulpay.pavulla.com | 9580 | Solange: QR codes, scans, webhooks |
 | `solange-console` | https://console.qr.kulpay.pavulla.com | 9680 | Solange's staff console |
 | `kulportal` | https://portal.kulpay.pavulla.com | 9780 | Off until ready (`make start-portal`) |
+| `website` | https://site.kulpay.pavulla.com | 8080 | The KulPay website (kulpay-website), a preview kept out of search engines; off until `make start-website` |
 | `blnk-server`, `blnk-worker` | — | — | Pinned self-hosted BLNK API and its queue processor; internal only |
 | `gateway` | — | — | KulPay's own payments gateway (katembe-payments), live mode; KulOffice uses its public root for top-ups and its management `/v1` API for transfers, supply, Payment Acceptance and reconciliation. Internal only |
 | `simulator` | https://sim.kulpay.pavulla.com (password) | 9880 | Development only: the PSP simulator the gateway's live M-Pesa, e-Mola and card bindings point at, and its customer page |
