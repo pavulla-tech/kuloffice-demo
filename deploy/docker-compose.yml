@@ -318,17 +318,12 @@ services:
       # "manual" payments would be money that never crossed a rail: off.
       KULPAY_CONNECTORS_MANUAL_ENABLED: "false"
       # What the credentials page adds to a merchant's own M-Pesa, e-Mola or
-      # card credentials: the provider's address, timeout and language. Dev
-      # merchants (the simulator's Merchant Lab) reach the simulator. To point
-      # a method at the real provider, drop its entry here (M-Pesa then uses
-      # its production host) or set its address.
-      KULPAY_CONNECTOR_SETUP_DEFAULTS: >-
-        {"mpesa":{"live":{"base_url":"http://simulator:8085/mpesa","timeout":"90s"},
-        "test":{"base_url":"http://simulator:8085/mpesa","timeout":"90s"}},
-        "emola":{"live":{"endpoint":"http://simulator:8085/emola","language":"pt","timeout":"90s"},
-        "test":{"endpoint":"http://simulator:8085/emola","language":"pt","timeout":"90s"}},
-        "stripe":{"live":{"api_base":"http://simulator:8085/card","timeout":"30s"},
-        "test":{"api_base":"http://simulator:8085/card","timeout":"30s"}}}
+      # card credentials: the provider's address, timeout and language, as
+      # JSON (driver -> live|test -> key -> value). Set in .env: the simulator
+      # while it plays a method, the real provider once it doesn't (see
+      # .env.example). Empty, M-Pesa uses its production host but e-Mola and
+      # card have no address, so their merchant credentials don't connect.
+      KULPAY_CONNECTOR_SETUP_DEFAULTS: ${GATEWAY_CONNECTOR_SETUP_DEFAULTS:-}
       # Only safe application/binding projections are pushed to KulOffice.
       # The service-principal token is audience-bound; no connector credential
       # is ever part of the projection.
