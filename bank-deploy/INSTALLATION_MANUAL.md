@@ -210,17 +210,21 @@ The root credential is retained only by MinIO and its one-shot initializer.
 9. Validate and provision the controlled FNB cash-deposit pilot:
 
    ```sh
-   make fnb-pilot-plan
-   make fnb-pilot-provision
+   ENV_FILE=.env sh scripts/provision-fnb-pilot.sh plan
+   ENV_FILE=.env sh scripts/provision-fnb-pilot.sh apply
    ```
+
+   These commands use Docker Compose directly through the included wrapper;
+   Make is not required on the bank server.
 
    The command is resumable and stops at `pilot`. A status of 3 with
    `waiting_for_certification` means the FNB integration must complete or fix
    the mandatory certification cases; run the same command again afterwards.
    Store `fnb-pilot-output/secrets.json` in the bank's secrets vault. To stop
    the pilot without deleting evidence or audit history, run
-   `make fnb-pilot-rollback`; this removes eligible pilot merchants and then
-   suspends the PSP through maker/checker approval.
+   `ENV_FILE=.env sh scripts/provision-fnb-pilot.sh rollback`; this removes
+   eligible pilot merchants and then suspends the PSP through maker/checker
+   approval.
 
 10. After provisioning succeeds, set
    `KULOFFICE_ADMIN_BASIC_ENABLED=false` and run:

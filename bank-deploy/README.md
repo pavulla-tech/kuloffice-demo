@@ -30,9 +30,13 @@ The FNB workflow is declarative and resumable. Copy
 legal, KYB, contract and statement details, then run:
 
 ```bash
-make fnb-pilot-plan
-make fnb-pilot-provision
+ENV_FILE=.env sh scripts/provision-fnb-pilot.sh plan
+ENV_FILE=.env sh scripts/provision-fnb-pilot.sh apply
 ```
+
+These are the bank-server commands and require only the existing Docker Compose
+installation; GNU Make is not required. The equivalent Make targets remain as
+optional operator shortcuts on hosts where Make is installed.
 
 The provisioner creates or reuses the maker, checker and FNB technical users;
 creates a local test business and postpaid biller; creates RF and QR invoices;
@@ -47,11 +51,12 @@ One-time keys and temporary passwords are written only to
 summary is `fnb-pilot-output/readiness-report.json`. Keep both outside source
 control and move the credentials into the bank's secrets vault immediately.
 
-If the controlled pilot must be stopped, run `make fnb-pilot-rollback`. It
-first empties the pilot merchant allow-list, then uses the configured maker and
-checker Gateway principals to suspend the PSP. The PSP, keys, approvals and
-audit history remain in place; suspension makes the account and its keys
-unusable. Reinstatement is intentionally not automated.
+If the controlled pilot must be stopped, run
+`ENV_FILE=.env sh scripts/provision-fnb-pilot.sh rollback`. It first empties
+the pilot merchant allow-list, then uses the configured maker and checker
+Gateway principals to suspend the PSP. The PSP, keys, approvals and audit
+history remain in place; suspension makes the account and its keys unusable.
+Reinstatement is intentionally not automated.
 
 The included launch-matrix override enables only the already-modelled live
 `partner_api/cash` cash-deposit route needed by this controlled pilot. All
