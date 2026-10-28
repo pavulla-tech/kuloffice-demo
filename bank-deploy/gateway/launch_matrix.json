@@ -1,0 +1,679 @@
+{
+  "version": "2026-10-28.1-fnb-pilot",
+  "description": "Bank-pilot launch capability matrix. It retains the approved 2026-10-12.3 route policy and enables the live partner_api/cash cash-deposit route solely for the controlled FNB pilot. Every unlisted route remains refused before any limit reservation or provider call, and off_net remains refused outright.",
+  "routes": [
+    {
+      "operation": "charge",
+      "driver": "kulpay_balance",
+      "methods": [
+        "kulpay_balance"
+      ],
+      "modes": [
+        "live",
+        "test"
+      ],
+      "scopes": [
+        "on_net"
+      ],
+      "enabled": true,
+      "note": "KulPay Balance checkout with internal merchant settlement (phase 4B): KulOffice reserves and captures; the money never leaves KulOffice."
+    },
+    {
+      "operation": "charge",
+      "driver": "mpesa",
+      "methods": [
+        "mpesa"
+      ],
+      "modes": [
+        "live",
+        "test"
+      ],
+      "scopes": [
+        "acc_top",
+        "orch_net"
+      ],
+      "enabled": true,
+      "note": "acc_top: collecting funds flow, external collection credited to the merchant's entitlement at KulPay. orch_net: direct (merchant-owned checkout) or managed pass-through (contractual settlement)."
+    },
+    {
+      "operation": "charge",
+      "driver": "emola",
+      "methods": [
+        "emola"
+      ],
+      "modes": [
+        "live",
+        "test"
+      ],
+      "scopes": [
+        "acc_top",
+        "orch_net"
+      ],
+      "enabled": true,
+      "note": "As mpesa."
+    },
+    {
+      "operation": "charge",
+      "driver": "stripe",
+      "methods": [
+        "card"
+      ],
+      "modes": [
+        "live",
+        "test"
+      ],
+      "scopes": [
+        "acc_top",
+        "orch_net"
+      ],
+      "enabled": true,
+      "note": "Card acquiring through the acquirer's hosted fields; as mpesa."
+    },
+    {
+      "operation": "charge",
+      "driver": "manual",
+      "methods": [
+        "manual"
+      ],
+      "modes": [
+        "live",
+        "test"
+      ],
+      "scopes": [
+        "acc_top",
+        "orch_net"
+      ],
+      "enabled": true,
+      "note": "Manual payments confirmed by an operator with evidence."
+    },
+    {
+      "operation": "charge",
+      "driver": "mock",
+      "methods": [
+        "card",
+        "mpesa",
+        "emola",
+        "simo",
+        "mkesh",
+        "bank_transfer",
+        "reference",
+        "manual",
+        "crypto",
+        "voucher",
+        "ussd",
+        "qr",
+        "wallet",
+        "redirect",
+        "bnpl"
+      ],
+      "modes": [
+        "test"
+      ],
+      "scopes": [
+        "acc_top",
+        "orch_net"
+      ],
+      "enabled": true,
+      "note": "The simulated fleet: the default connector of every method without a real one, and the mock binding driver."
+    },
+    {
+      "operation": "charge",
+      "driver": "mock",
+      "methods": [
+        "card",
+        "mpesa",
+        "emola",
+        "simo",
+        "mkesh",
+        "bank_transfer",
+        "reference",
+        "manual",
+        "crypto",
+        "voucher",
+        "ussd",
+        "qr",
+        "wallet",
+        "redirect",
+        "bnpl"
+      ],
+      "modes": [
+        "live"
+      ],
+      "scopes": [
+        "acc_top",
+        "orch_net"
+      ],
+      "enabled": false,
+      "note": "Owner decision 2026-10-12: the simulated fleet does not serve live-mode charges at launch; a live charge runs only on a real connector (a live request that would fall to the simulated default, or a live mock binding, is refused route_not_enabled)."
+    },
+    {
+      "operation": "payout",
+      "driver": "mpesa",
+      "methods": [
+        "mpesa"
+      ],
+      "modes": [
+        "live",
+        "test"
+      ],
+      "scopes": [
+        "legacy_payout"
+      ],
+      "enabled": true,
+      "legacy": true,
+      "owner_decision": "POST /v1/payouts pays from the merchant's available balance at the gateway to a wallet or account. Not classified into the design's scopes pending the owner's phase 0 decision; if it is off_net, delete the payout rows and payouts are refused."
+    },
+    {
+      "operation": "payout",
+      "driver": "emola",
+      "methods": [
+        "emola"
+      ],
+      "modes": [
+        "live",
+        "test"
+      ],
+      "scopes": [
+        "legacy_payout"
+      ],
+      "enabled": true,
+      "legacy": true,
+      "owner_decision": "As the mpesa payout row."
+    },
+    {
+      "operation": "payout",
+      "driver": "mock",
+      "methods": [
+        "card",
+        "mpesa",
+        "emola",
+        "simo",
+        "mkesh",
+        "bank_transfer",
+        "reference",
+        "manual",
+        "crypto",
+        "voucher",
+        "ussd",
+        "qr",
+        "wallet",
+        "redirect",
+        "bnpl"
+      ],
+      "modes": [
+        "test"
+      ],
+      "scopes": [
+        "legacy_payout"
+      ],
+      "enabled": true,
+      "legacy": true,
+      "owner_decision": "As the mpesa payout row; the simulated fleet pays out in test mode."
+    },
+    {
+      "operation": "payout",
+      "driver": "mock",
+      "methods": [
+        "card",
+        "mpesa",
+        "emola",
+        "simo",
+        "mkesh",
+        "bank_transfer",
+        "reference",
+        "manual",
+        "crypto",
+        "voucher",
+        "ussd",
+        "qr",
+        "wallet",
+        "redirect",
+        "bnpl"
+      ],
+      "modes": [
+        "live"
+      ],
+      "scopes": [
+        "legacy_payout"
+      ],
+      "enabled": false,
+      "legacy": true,
+      "owner_decision": "Decided 2026-10-12: the simulated fleet does not pay out in live mode at launch. (legacy_payout rows are flagged legacy until the phase 0 payout decision.)"
+    },
+    {
+      "operation": "payout",
+      "driver": "kulpay_balance",
+      "methods": [
+        "kulpay_balance"
+      ],
+      "modes": [
+        "live",
+        "test"
+      ],
+      "scopes": [
+        "off_net"
+      ],
+      "enabled": false,
+      "note": "KulPay balance withdrawal to an external destination: off_net, disabled (design 7.1, 19)."
+    },
+    {
+      "operation": "name_lookup",
+      "driver": "mpesa",
+      "methods": [
+        "mpesa"
+      ],
+      "modes": [
+        "live",
+        "test"
+      ],
+      "scopes": [
+        "none"
+      ],
+      "enabled": true,
+      "note": "Beneficiary name lookup before a payout; moves no money."
+    },
+    {
+      "operation": "name_lookup",
+      "driver": "emola",
+      "methods": [
+        "emola"
+      ],
+      "modes": [
+        "live",
+        "test"
+      ],
+      "scopes": [
+        "none"
+      ],
+      "enabled": true,
+      "note": "As mpesa."
+    },
+    {
+      "operation": "name_lookup",
+      "driver": "kulpay_cms",
+      "methods": [
+        "cash_deposit"
+      ],
+      "modes": [
+        "live",
+        "test"
+      ],
+      "scopes": [
+        "none"
+      ],
+      "enabled": true,
+      "note": "Deposit reference lookup through the KulPay CMS (PSP-7.7)."
+    },
+    {
+      "operation": "name_lookup",
+      "driver": "mock",
+      "methods": [
+        "card",
+        "mpesa",
+        "emola",
+        "simo",
+        "mkesh",
+        "bank_transfer",
+        "reference",
+        "manual",
+        "crypto",
+        "voucher",
+        "ussd",
+        "qr",
+        "wallet",
+        "redirect",
+        "bnpl",
+        "cash_deposit"
+      ],
+      "modes": [
+        "test"
+      ],
+      "scopes": [
+        "none"
+      ],
+      "enabled": true,
+      "note": "The simulated fleet, test mode."
+    },
+    {
+      "operation": "name_lookup",
+      "driver": "mock",
+      "methods": [
+        "card",
+        "mpesa",
+        "emola",
+        "simo",
+        "mkesh",
+        "bank_transfer",
+        "reference",
+        "manual",
+        "crypto",
+        "voucher",
+        "ussd",
+        "qr",
+        "wallet",
+        "redirect",
+        "bnpl",
+        "cash_deposit"
+      ],
+      "modes": [
+        "live"
+      ],
+      "scopes": [
+        "none"
+      ],
+      "enabled": false,
+      "note": "Owner decision 2026-10-12: the simulated fleet does not answer live-mode name lookups at launch."
+    },
+    {
+      "operation": "incoming_transfer",
+      "driver": "partner_api",
+      "methods": [
+        "deposit_reference",
+        "alias",
+        "virtual_account",
+        "payment_reference"
+      ],
+      "modes": [
+        "live",
+        "test"
+      ],
+      "scopes": [
+        "acc_top"
+      ],
+      "enabled": true,
+      "note": "Bank/PSP-initiated funding into KulPay (phase 5B), for partners certified for account_funding.incoming."
+    },
+    {
+      "operation": "bill_payment",
+      "driver": "edm",
+      "methods": [
+        "balance"
+      ],
+      "modes": [
+        "live",
+        "test"
+      ],
+      "scopes": [
+        "on_net"
+      ],
+      "enabled": true,
+      "note": "Prefunded vending from the channel's balance, settled through internal supply clearing."
+    },
+    {
+      "operation": "bill_payment",
+      "driver": "edm",
+      "methods": [
+        "collect",
+        "deposit"
+      ],
+      "modes": [
+        "live",
+        "test"
+      ],
+      "scopes": [
+        "orch_net"
+      ],
+      "enabled": true,
+      "note": "Purpose-bound bill payment collected from the payer first (the collection itself is a charge route)."
+    },
+    {
+      "operation": "bill_payment",
+      "driver": "biller_rest",
+      "methods": [
+        "balance"
+      ],
+      "modes": [
+        "live",
+        "test"
+      ],
+      "scopes": [
+        "on_net"
+      ],
+      "enabled": true,
+      "note": "A biller on KulPay's published biller contract."
+    },
+    {
+      "operation": "bill_payment",
+      "driver": "biller_rest",
+      "methods": [
+        "collect",
+        "deposit"
+      ],
+      "modes": [
+        "live",
+        "test"
+      ],
+      "scopes": [
+        "orch_net"
+      ],
+      "enabled": true,
+      "note": "As edm."
+    },
+    {
+      "operation": "bill_payment",
+      "driver": "vodacom_airtime",
+      "methods": [
+        "balance"
+      ],
+      "modes": [
+        "live",
+        "test"
+      ],
+      "scopes": [
+        "on_net"
+      ],
+      "enabled": true,
+      "note": "Direct MNO airtime and bundles."
+    },
+    {
+      "operation": "bill_payment",
+      "driver": "vodacom_airtime",
+      "methods": [
+        "collect",
+        "deposit"
+      ],
+      "modes": [
+        "live",
+        "test"
+      ],
+      "scopes": [
+        "orch_net"
+      ],
+      "enabled": true,
+      "note": "As edm."
+    },
+    {
+      "operation": "bill_payment",
+      "driver": "movitel_airtime",
+      "methods": [
+        "balance"
+      ],
+      "modes": [
+        "live",
+        "test"
+      ],
+      "scopes": [
+        "on_net"
+      ],
+      "enabled": true,
+      "note": "Direct MNO airtime and bundles."
+    },
+    {
+      "operation": "bill_payment",
+      "driver": "movitel_airtime",
+      "methods": [
+        "collect",
+        "deposit"
+      ],
+      "modes": [
+        "live",
+        "test"
+      ],
+      "scopes": [
+        "orch_net"
+      ],
+      "enabled": true,
+      "note": "As edm."
+    },
+    {
+      "operation": "bill_payment",
+      "driver": "tmcel_airtime",
+      "methods": [
+        "balance"
+      ],
+      "modes": [
+        "live",
+        "test"
+      ],
+      "scopes": [
+        "on_net"
+      ],
+      "enabled": true,
+      "note": "Direct MNO airtime and bundles."
+    },
+    {
+      "operation": "bill_payment",
+      "driver": "tmcel_airtime",
+      "methods": [
+        "collect",
+        "deposit"
+      ],
+      "modes": [
+        "live",
+        "test"
+      ],
+      "scopes": [
+        "orch_net"
+      ],
+      "enabled": true,
+      "note": "As edm."
+    },
+    {
+      "operation": "bill_payment",
+      "driver": "kulpay",
+      "methods": [
+        "balance"
+      ],
+      "modes": [
+        "live",
+        "test"
+      ],
+      "scopes": [
+        "on_net"
+      ],
+      "enabled": true,
+      "note": "A presented invoice of a biller with no supply connector: KulPay delivers and remits."
+    },
+    {
+      "operation": "bill_payment",
+      "driver": "kulpay",
+      "methods": [
+        "collect",
+        "deposit"
+      ],
+      "modes": [
+        "live",
+        "test"
+      ],
+      "scopes": [
+        "orch_net"
+      ],
+      "enabled": true,
+      "note": "As above, collected from the payer first."
+    },
+    {
+      "operation": "bill_payment",
+      "driver": "kulpay",
+      "methods": [
+        "transfer"
+      ],
+      "modes": [
+        "live",
+        "test"
+      ],
+      "scopes": [
+        "orch_net"
+      ],
+      "enabled": true,
+      "note": "A presented invoice paid by a transfer or deposit at a partner bank or PSP citing its RF payment reference (BIL-5.8)."
+    },
+    {
+      "operation": "bill_payment",
+      "driver": "fake",
+      "methods": [
+        "balance"
+      ],
+      "modes": [
+        "test"
+      ],
+      "scopes": [
+        "on_net"
+      ],
+      "enabled": true,
+      "note": "The simulated supplier; test mode only (its connectors cannot be created in live)."
+    },
+    {
+      "operation": "bill_payment",
+      "driver": "fake",
+      "methods": [
+        "collect",
+        "deposit",
+        "transfer"
+      ],
+      "modes": [
+        "test"
+      ],
+      "scopes": [
+        "orch_net"
+      ],
+      "enabled": true,
+      "note": "As above; transfer: a presented invoice of a biller on the simulated supplier paid by a transfer citing its RF reference (BIL-5.8), to test a supplier refusing it."
+    },
+    {
+      "operation": "cash_deposit",
+      "driver": "partner_api",
+      "methods": [
+        "cash"
+      ],
+      "modes": [
+        "live"
+      ],
+      "scopes": [
+        "acc_top"
+      ],
+      "enabled": true,
+      "note": "Controlled FNB pilot: live cash deposits reported by the partner bank and credited by statement matching or an approved exception assignment (PSP-7.6, IG-52)."
+    },
+    {
+      "operation": "cash_deposit",
+      "driver": "partner_api",
+      "methods": [
+        "cash"
+      ],
+      "modes": [
+        "test"
+      ],
+      "scopes": [
+        "acc_top"
+      ],
+      "enabled": true,
+      "note": "Test mode keeps cash deposits for partner bank sandboxes and certification; no real money."
+    },
+    {
+      "operation": "transfer",
+      "driver": "mpesa",
+      "methods": [
+        "mpesa"
+      ],
+      "modes": [
+        "live",
+        "test"
+      ],
+      "scopes": [
+        "orch_net"
+      ],
+      "enabled": false,
+      "note": "Generic external-to-external transfer: orch_net, disabled (design 7.1, 19). No API executes it; listed so the walk proves it is refused."
+    }
+  ]
+}

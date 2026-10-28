@@ -1,5 +1,7 @@
 .env
 kuloffice.env
+fnb-pilot.yaml
+fnb-pilot-output/
 backups/
 certificates/
 *.tar

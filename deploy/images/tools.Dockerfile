@@ -3,7 +3,8 @@
 # stack's bootstrap and reviewer seed (context `stack`), and the deploy's own
 # (context `tools`). Run by `make init` and `make operator`.
 FROM python:3.12-alpine
-RUN apk add --no-cache curl
+RUN apk add --no-cache curl \
+    && pip install --no-cache-dir PyYAML==6.0.3
 COPY . /setup
 COPY --from=stack bootstrap.sh seed_reviewer.py /stack/
 COPY --from=tools . /tools

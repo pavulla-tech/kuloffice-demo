@@ -288,8 +288,12 @@ services:
       KULPAY_KULOFFICE_CLIENT_ID: ${GATEWAY_KULOFFICE_CLIENT_ID:-kulpay-gateway}
       KULPAY_KULOFFICE_CLIENT_SECRET: ${GATEWAY_KULOFFICE_CLIENT_SECRET}
       KULPAY_KULOFFICE_AUDIENCE: ${ADMIN_CLIENT_ID:-kulpay-backend}
+      # The embedded Gateway matrix keeps live cash deposits disabled. This
+      # reviewed bank-pilot matrix enables partner_api/cash for the pilot.
+      KULPAY_LAUNCH_MATRIX_FILE: /etc/kulpay/launch_matrix.json
     volumes:
       - gateway-config:/etc/kulpay:ro
+      - ./gateway/launch_matrix.json:/etc/kulpay/launch_matrix.json:ro
     ports:
       - ${PUBLISH_ADDRESS:-127.0.0.1}:${GATEWAY_PORT:-9480}:9090
     healthcheck:
@@ -475,6 +479,7 @@ services:
       KEYCLOAK_URL: http://keycloak:8080
       KULOFFICE_URL: http://kuloffice:8080
       GATEWAY_MANAGEMENT_URL: http://gateway:9091/v1
+      GATEWAY_PUBLIC_INTERNAL_URL: http://gateway:9090
     depends_on:
       keycloak: {condition: service_healthy}
       kuloffice: {condition: service_started}

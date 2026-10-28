@@ -90,6 +90,19 @@ $EDITOR kuloffice.env
 make config
 ```
 
+For the FNB cash-deposit pilot, also prepare its non-secret provisioning input:
+
+```sh
+cp provisioning/fnb-pilot.example.yaml fnb-pilot.yaml
+chmod 600 fnb-pilot.yaml
+```
+
+Fill every value marked `REQUIRED`, including the KYB evidence, signed
+contract and a real FNB sample statement. The referenced files must be present
+on the application server when provisioning runs. Place them beside the YAML
+and use relative paths, so the entire input directory can be mounted read-only.
+Do not place API keys, passwords or license tokens in this YAML.
+
 Generate every secret independently. Recommended commands are
 `openssl rand -hex 32` for API/session keys and
 `openssl rand -base64 32` for 32-byte encryption keys. Generate the BLNK
@@ -194,14 +207,29 @@ The root credential is retained only by MinIO and its one-shot initializer.
 
    Generated integration secrets are written into `.env` without being printed.
 
-9. After provisioning succeeds, set
+9. Validate and provision the controlled FNB cash-deposit pilot:
+
+   ```sh
+   make fnb-pilot-plan
+   make fnb-pilot-provision
+   ```
+
+   The command is resumable and stops at `pilot`. A status of 3 with
+   `waiting_for_certification` means the FNB integration must complete or fix
+   the mandatory certification cases; run the same command again afterwards.
+   Store `fnb-pilot-output/secrets.json` in the bank's secrets vault. To stop
+   the pilot without deleting evidence or audit history, run
+   `make fnb-pilot-rollback`; this removes eligible pilot merchants and then
+   suspends the PSP through maker/checker approval.
+
+10. After provisioning succeeds, set
    `KULOFFICE_ADMIN_BASIC_ENABLED=false` and run:
 
    ```sh
    make restart S=kuloffice
    ```
 
-10. Complete [`ACCEPTANCE.md`](ACCEPTANCE.md) before enabling money movement.
+11. Complete [`ACCEPTANCE.md`](ACCEPTANCE.md) before enabling money movement.
 
 ## Real payment connectors
 

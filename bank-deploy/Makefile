@@ -4,7 +4,7 @@ S ?=
 ROLE ?= Revisores
 SOLANGE ?=
 
-.PHONY: help setup config pull start stop restart ps logs provision operator qr-provision gateway-provision health backup
+.PHONY: help setup config pull start stop restart ps logs provision operator qr-provision gateway-provision fnb-pilot-plan fnb-pilot-provision fnb-pilot-rollback health backup
 
 help:
 	@echo "KulPay bank deployment"
@@ -16,6 +16,9 @@ help:
 	@echo "  make operator EMAIL=... FIRST=... LAST=... [ROLE=Revisores|ADMIN]"
 	@echo "  make qr-provision          provision KulOffice in Solange"
 	@echo "  make gateway-provision     provision signed Gateway event delivery"
+	@echo "  make fnb-pilot-plan        validate and show the FNB pilot plan"
+	@echo "  make fnb-pilot-provision   resume FNB pilot provisioning through pilot"
+	@echo "  make fnb-pilot-rollback    suspend FNB pilot without deleting its audit trail"
 	@echo "  make health                run installation acceptance checks"
 	@echo "  make ps / make logs S=x"
 	@echo "  make restart [S=x]         recreate services and reload environment"
@@ -64,6 +67,15 @@ qr-provision: config
 
 gateway-provision: config
 	@ENV_FILE=$(ENV_FILE) COMPOSE="$(COMPOSE)" sh scripts/provision-gateway.sh
+
+fnb-pilot-plan: config
+	@ENV_FILE=$(ENV_FILE) sh scripts/provision-fnb-pilot.sh plan
+
+fnb-pilot-provision: config
+	@ENV_FILE=$(ENV_FILE) sh scripts/provision-fnb-pilot.sh apply
+
+fnb-pilot-rollback: config
+	@ENV_FILE=$(ENV_FILE) sh scripts/provision-fnb-pilot.sh rollback
 
 health:
 	@ENV_FILE=$(ENV_FILE) COMPOSE="$(COMPOSE)" sh scripts/health.sh
