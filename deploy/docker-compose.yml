@@ -445,6 +445,12 @@ services:
       # direct M-Pesa, e-Mola and SIMO bindings to the Gateway
       # (POST /v1/settlements/connector-reports). bin/kulpay secrets makes it.
       SIMULATOR_GATEWAY_SETTLEMENT_KEY: ${GATEWAY_SETTLEMENT_KEY:-}
+      # The rails the bind step points at the simulator (same settings): it
+      # settles and reports only those. With the real M-Pesa and e-Mola
+      # (SIMULATOR_BIND_METHODS=card) it leaves them alone. Daily settlement
+      # of the real providers is deferred.
+      SIMULATOR_BIND_METHODS: ${SIMULATOR_BIND_METHODS:-mpesa emola card}
+      SIMULATOR_BIND_CARD_DRIVER: ${SIMULATOR_BIND_CARD_DRIVER:-stripe}
     volumes:
       - simulator-data:/data
     ports:
