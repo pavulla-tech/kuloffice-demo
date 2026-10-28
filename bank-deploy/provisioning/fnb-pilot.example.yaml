@@ -110,6 +110,26 @@ partner:
 
   capability_matrix:
     types:
+      # Declared, never used: the Gateway images of the bank pilot (v0.1.1-
+      # alpha14) only certify partners that have a payment row, and FNB only
+      # takes cash deposits. Certification runs this row's cases against the
+      # Gateway's own sandbox mock; FNB only receives the run's test webhooks
+      # and lists its payments on the statement (the provisioner's statement
+      # round). No real payment can reach FNB through it: routing to a partner
+      # needs that partner's own connector binding for the method, and FNB
+      # has none. Later images certify incoming-funding partners directly;
+      # drop this row then.
+      - type: SALE
+        methods: [bank_transfer]
+        direction: inbound
+        mode: sync
+        currencies: [MZN]
+        countries: [MZ]
+        partial: false
+        three_ds: false
+        idempotency: true
+        confirmation: polling
+        timeout_ms: 10000
       - type: NAME_LOOKUP
         methods: [cash_deposit]
         direction: inbound
