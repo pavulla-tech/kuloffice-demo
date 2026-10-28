@@ -271,6 +271,12 @@ services:
       # without a valid kulpay-payments licence. Optional here for the same
       # reason as the audit key: the gateway itself names what is missing.
       KULPAY_LICENSE_KEY: ${GATEWAY_LICENSE_KEY:-}
+      # Cards read at a KulPay terminal (TDES DUKPT): the software HSM opens
+      # them from a test BDK, for dev against the mock SIMO only. Empty: no
+      # HSM, terminal cards are refused. ALLOW_LIVE lets it serve this live-
+      # mode gateway. Production has a hardware HSM instead.
+      KULPAY_HSM_SOFT_BDK: ${GATEWAY_HSM_SOFT_BDK:-}
+      KULPAY_HSM_ALLOW_LIVE: ${GATEWAY_HSM_ALLOW_LIVE:-false}
       KULPAY_ADDR: ":9090"
       KULPAY_MGMT_ADDR: ":9091"
       # A payment link may send the payer back to the KulPay web app once paid
@@ -383,6 +389,9 @@ services:
       # e-Mola (their bindings set in the Gateway's Connectors page) sets
       # SIMULATOR_BIND_METHODS=card, so a deploy never puts them back.
       BIND_METHODS: ${SIMULATOR_BIND_METHODS:-mpesa emola card}
+      # The card rail: stripe (the Stripe-shaped card API) or simo (the mock
+      # SIMO acquirer: terminal cards and the card vault; needs the HSM above).
+      BIND_CARD_DRIVER: ${SIMULATOR_BIND_CARD_DRIVER:-stripe}
 
   # Development only: plays M-Pesa, e-Mola and the card acquirer, and their
   # customers. Its page (SIMULATOR_PUBLIC_URL) is where someone approves or
