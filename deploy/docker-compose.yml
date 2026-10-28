@@ -175,6 +175,7 @@ services:
       GATEWAY_SERVICE_API_KEY: ${GATEWAY_SERVICE_API_KEY:?set GATEWAY_SERVICE_API_KEY}
       GATEWAY_ADMIN_KEY: ${GATEWAY_ADMIN_KEY:?set GATEWAY_ADMIN_KEY}
       GATEWAY_CHECKER_KEY: ${GATEWAY_CHECKER_KEY:?set GATEWAY_CHECKER_KEY}
+      GATEWAY_SETTLEMENT_KEY: ${GATEWAY_SETTLEMENT_KEY:?set GATEWAY_SETTLEMENT_KEY}
       GATEWAY_ACCOUNT_ID: ${GATEWAY_ACCOUNT_ID:?set GATEWAY_ACCOUNT_ID}
       GATEWAY_ENCRYPTION_KEY: ${GATEWAY_ENCRYPTION_KEY:?set GATEWAY_ENCRYPTION_KEY}
       # A gateway refuses to boot on a scope it does not know. The default is
@@ -188,7 +189,7 @@ services:
       - /bin/sh
       - -ec
       - |
-        for k in "$$GATEWAY_API_KEY" "$$GATEWAY_SERVICE_API_KEY" "$$GATEWAY_ADMIN_KEY" "$$GATEWAY_CHECKER_KEY"; do
+        for k in "$$GATEWAY_API_KEY" "$$GATEWAY_SERVICE_API_KEY" "$$GATEWAY_ADMIN_KEY" "$$GATEWAY_CHECKER_KEY" "$$GATEWAY_SETTLEMENT_KEY"; do
           case $$k in *[!0-9a-f]* | "") echo "gateway keys must be hex (openssl rand -hex 32)" >&2; exit 1 ;; esac
         done
         case "$$GATEWAY_ACCOUNT_ID" in *[!0-9A-Za-z]* | "") echo "GATEWAY_ACCOUNT_ID must be one 27-character alphanumeric tenant id" >&2; exit 1 ;; esac
@@ -244,6 +245,17 @@ services:
             # prepared (settlement destinations, arrangements, confirmations).
             principal: "operator:kit-checker"
             scopes: [admin:read, admin:write, accounts:read, accounts:write, reconciliation:read, reconciliation:write]
+            rate_per_minute: 60
+          - id: simulator-settlements
+            secret: "$$GATEWAY_SETTLEMENT_KEY"
+            mode: live
+            account_id: "$$GATEWAY_ACCOUNT_ID"
+            label: "simulator provider settlements"
+            # Development: the PSP simulator uploads the provider settlement
+            # files (M-Pesa, e-Mola, SIMO) of KulPay's own direct connector
+            # bindings (POST /v1/settlements/connector-reports). That scope
+            # only, and no principal: it prepares and approves nothing.
+            scopes: [reconciliation:write]
             rate_per_minute: 60
         EOF
         mv /config/kulpay-payments.yaml.tmp /config/kulpay-payments.yaml
@@ -428,6 +440,11 @@ services:
       # http://simulator:8085/partner-webhooks in the Gateway portal's webhooks
       # step and put the secret it shows once here.
       SIMULATOR_PARTNER_WEBHOOK_SECRET: ${SIMULATOR_PARTNER_WEBHOOK_SECRET:-}
+      # Development only: the key (reconciliation:write, nothing else) with
+      # which the simulator uploads the provider settlement files of KulPay's
+      # direct M-Pesa, e-Mola and SIMO bindings to the Gateway
+      # (POST /v1/settlements/connector-reports). bin/kulpay secrets makes it.
+      SIMULATOR_GATEWAY_SETTLEMENT_KEY: ${GATEWAY_SETTLEMENT_KEY:-}
     volumes:
       - simulator-data:/data
     ports:

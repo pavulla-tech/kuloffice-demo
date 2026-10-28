@@ -57,6 +57,23 @@ class ServiceKeyScopesTest(unittest.TestCase):
     def test_account_key_has_no_service_scope(self):
         self.assertFalse(any(s.startswith("service:") for s in key_scopes("kuloffice")))
 
+    def test_simulator_settlement_key_holds_only_reconciliation_write(self):
+        self.assertEqual(key_scopes("simulator-settlements"), ["reconciliation:write"])
+        text = COMPOSE.read_text()
+        block = re.search(r"- id: simulator-settlements\n(.*?)(?=\n\s*- id: |\n\s*EOF)", text, re.S).group(1)
+        self.assertIn('secret: "$$GATEWAY_SETTLEMENT_KEY"', block)
+        self.assertIn('account_id: "$$GATEWAY_ACCOUNT_ID"', block)
+        self.assertRegex(block, r"(?m)^\s*mode: live\s*$")
+        self.assertNotRegex(block, r"(?m)^\s*principal:")
+        # Checked as hex with the other keys, and handed to the simulator.
+        self.assertRegex(text, r'for k in [^\n]*"\$\$GATEWAY_SETTLEMENT_KEY"; do')
+        self.assertRegex(text, r"(?m)^\s*SIMULATOR_GATEWAY_SETTLEMENT_KEY: \$\{GATEWAY_SETTLEMENT_KEY:-\}\s*$")
+
+    def test_kulpay_secrets_generates_the_settlement_key(self):
+        script = (COMPOSE.parent / "bin" / "kulpay").read_text()
+        loop = re.search(r"gateway_secrets\(\) \{.*?\n\}", script, re.S).group(0)
+        self.assertRegex(loop, r"\bGATEWAY_SETTLEMENT_KEY\b")
+
 
 if __name__ == "__main__":
     unittest.main()

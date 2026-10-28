@@ -126,7 +126,7 @@ port 465 (gateway v0.1.1-alpha07 on). Verify with
 `docker compose --env-file .env logs gateway` that there is no
 `no mail relay configured` warning and no SMTP delivery error.
 
-The simulator has two distinct Gateway relationships:
+The simulator has three distinct Gateway relationships:
 
 - its provider endpoints are already bound by `gateway-bind` for KulPay's own
   payments; the successful `bound mpesa/emola/card` output confirms that link;
@@ -136,6 +136,12 @@ The simulator has two distinct Gateway relationships:
   recreate the simulator with `make restart S=simulator`. Until then, the
   workbench's “Gateway not configured” state is expected and does not mean the
   provider bindings are broken.
+- it uploads the provider settlement files (M-Pesa, e-Mola, SIMO) of those
+  bindings to `POST /v1/settlements/connector-reports` with
+  `GATEWAY_SETTLEMENT_KEY`, a key of KulPay's Gateway account
+  (`GATEWAY_ACCOUNT_ID`) holding only `reconciliation:write`, passed to it as
+  `SIMULATOR_GATEWAY_SETTLEMENT_KEY`. `bin/kulpay secrets` generates it when
+  missing; then `make restart S="gateway-config gateway simulator"`.
 
 ### Partner cash deposits (development)
 

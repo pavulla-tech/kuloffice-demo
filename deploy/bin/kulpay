@@ -479,13 +479,14 @@ kuloffice_secrets() {
 # shown) on every deploy, because compose needs them for every unit: KulOffice's
 # Gateway tenant (27 alphanumerics, fixed from then on), its platform service
 # key, the Keycloak secret of the Gateway's client, the second operator
-# (checker) key, the cash-deposit lookup key and secret, and the report
-# signing key (an Ed25519 seed, base64).
+# (checker) key, the simulator's provider-settlement upload key (dev), the
+# cash-deposit lookup key and secret, and the report signing key (an Ed25519
+# seed, base64).
 gateway_secrets() {
   [[ -n $(env_get GATEWAY_ACCOUNT_ID || true) ]] ||
     env_set GATEWAY_ACCOUNT_ID "$(head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n' | cut -c1-27)"
   local k
-  for k in GATEWAY_SERVICE_API_KEY GATEWAY_KULOFFICE_CLIENT_SECRET GATEWAY_CHECKER_KEY GATEWAY_OIDC_CLIENT_SECRET GATEWAY_SESSION_SECRET \
+  for k in GATEWAY_SERVICE_API_KEY GATEWAY_KULOFFICE_CLIENT_SECRET GATEWAY_CHECKER_KEY GATEWAY_SETTLEMENT_KEY GATEWAY_OIDC_CLIENT_SECRET GATEWAY_SESSION_SECRET \
       KULPAY_CMS_LOOKUP_API_KEY KULPAY_CMS_LOOKUP_SIGNING_SECRET; do
     [[ -n $(env_get "$k" || true) ]] ||
       env_set "$k" "$(head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n')"
