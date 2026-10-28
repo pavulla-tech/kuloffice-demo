@@ -101,7 +101,11 @@ Fill every value marked `REQUIRED`, including the KYB evidence, signed
 contract and a real FNB sample statement. The referenced files must be present
 on the application server when provisioning runs. Place them beside the YAML
 and use relative paths, so the entire input directory can be mounted read-only.
-Do not place API keys, passwords or license tokens in this YAML.
+Do not place API keys, passwords or license tokens in this YAML. Once FNB holds
+KulPay's trust (client-funds) account, add its end-of-day statement profile
+with balances (camt.053, cut-off before 18:00 UTC) and sample under
+`partner.statement_profile.additional_profiles`, and the account under
+`partner.safeguarding_accounts`; re-running `apply` installs and registers them.
 
 Generate every secret independently. Recommended commands are
 `openssl rand -hex 32` for API/session keys and

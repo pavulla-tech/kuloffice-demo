@@ -62,6 +62,19 @@ bank (`simulator-bank.example.yaml`, `make simulator-bank` in `deploy/`): the
 simulator receives its keys and webhook secrets and answers the statement
 round itself.
 
+A bank holding KulPay's client funds sends one more statement: its trust
+account's end of day, with opening and closing balances (camt.053), which the
+Gateway's daily safeguarding check reads. Declare it in
+`partner.statement_profile.additional_profiles` (`{sample_file, profile}`,
+installed beside the main profile, each sample previewed first; a re-run adds
+the ones the Gateway lacks, even after certification) and the account in
+`partner.safeguarding_accounts` (`{account, currency, bank}`, registered once
+with the Gateway admin key). Both stay empty in `fnb-pilot.example.yaml` until
+FNB holds the account; the simulator's YAML fills them (`simbank-trust-eod`,
+`SIMBANK-TRUST-001`) and names its trust profile in
+`simulator.trust_statement_profile`. The readiness report lists the installed
+profiles and safeguarding accounts.
+
 One-time keys and temporary passwords are written only to
 `fnb-pilot-output/secrets.json` with mode `0600`. The non-secret operational
 summary is `fnb-pilot-output/readiness-report.json`. Keep both outside source

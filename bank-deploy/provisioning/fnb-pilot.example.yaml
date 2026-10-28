@@ -162,6 +162,34 @@ partner:
       currency: MZN
       accounts: []             # REQUIRED; FNB receiving account(s)
       # CSV/XLSX/JSON profiles also need parser settings and a mapping.
+    # Other statements FNB sends, installed beside the one above: the trust
+    # (client-funds) account's end-of-day statement with its opening and
+    # closing balances (camt.053, or MT940), which the daily safeguarding
+    # check reads. Each entry is {sample_file, profile: {...}} with a real
+    # FNB sample; unknown until FNB holds the trust account.
+    additional_profiles: []
+    # - sample_file: fnb-trust-camt053.xml
+    #   profile:
+    #     id: fnb-trust-eod
+    #     standard: camt.053
+    #     direction: push
+    #     channel: api_upload
+    #     frequency: daily
+    #     cutoff: "16:00"      # before the Gateway's 18:00 UTC check
+    #     timezone: Africa/Maputo
+    #     arrival_window: 2h
+    #     granularity: transaction
+    #     security:
+    #       checksum: sha256
+    #     acknowledgement: api
+    #     currency: MZN
+    #     accounts: []         # the trust account
+
+  # Accounts holding KulPay's client funds, registered as the Gateway's
+  # safeguarding accounts (their statements' closing balances are the money
+  # held). Unknown until FNB holds the trust account.
+  safeguarding_accounts: []
+  # - {account: "", currency: MZN, bank: FNB}
 
 pilot:
   routing_weight: 10

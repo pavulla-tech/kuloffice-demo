@@ -278,7 +278,8 @@ gateway-billers:
 # a real bank's pilot (../bank-deploy/provisioning/psp_provision.py with
 # simulator-bank.example.yaml): application, KYB, terms, capabilities, its
 # webhook endpoint, certification (the simulator answers, statement included)
-# and the pilot; the simulator receives its keys and webhook secrets. Safe to
+# and the pilot; its trust account's camt.053 profile and safeguarding
+# account; the simulator receives its keys, webhook secrets and profiles. Safe to
 # repeat: it resumes. SIMBANK=plan checks without changing anything;
 # SIMBANK=rollback suspends it. State, secrets and the readiness report:
 # simulator-bank-output/ (root-only).

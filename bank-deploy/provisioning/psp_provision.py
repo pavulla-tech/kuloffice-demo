@@ -105,12 +105,14 @@ def load_config(path: Path) -> dict[str, Any]:
             for part in parts[:-1]:
                 container = container[part]
             container[parts[-1]] = str(target)
-    for document in nested(value, "partner.kyb.documents", []) or []:
-        if isinstance(document, dict) and document.get("file"):
-            target = Path(str(document["file"])).expanduser()
-            if not target.is_absolute():
-                target = path.parent / target
-            document["file"] = str(target)
+    for document in (nested(value, "partner.kyb.documents", []) or []) + \
+            (nested(value, "partner.statement_profile.additional_profiles", []) or []):
+        for key in ("file", "sample_file"):
+            if isinstance(document, dict) and document.get(key):
+                target = Path(str(document[key])).expanduser()
+                if not target.is_absolute():
+                    target = path.parent / target
+                document[key] = str(target)
     require(value, [
         "operators.maker.email", "operators.maker.first_name", "operators.maker.last_name",
         "operators.checker.email", "operators.checker.first_name", "operators.checker.last_name",
@@ -181,12 +183,47 @@ def load_config(path: Path) -> dict[str, Any]:
         file_path = Path(str(nested(value, name))).expanduser()
         if not file_path.is_file():
             raise ProvisionError(f"{name} does not exist: {file_path}")
+    validate_additional_profiles(value)
+    validate_safeguarding_accounts(value)
     for index, document in enumerate(nested(value, "partner.kyb.documents", [])):
         if not isinstance(document, dict) or not document.get("type") or not document.get("file"):
             raise ProvisionError(f"partner.kyb.documents[{index}] needs type and file")
         if not Path(str(document["file"])).expanduser().is_file():
             raise ProvisionError(f"KYB file does not exist: {document['file']}")
     return value
+
+
+def validate_additional_profiles(config: dict[str, Any]) -> None:
+    """Other statements the partner sends (the trust account's camt.053 with
+    its balances): each a profile with a sample that must parse, installed
+    beside the main one."""
+    extra = nested(config, "partner.statement_profile.additional_profiles", []) or []
+    if not isinstance(extra, list):
+        raise ProvisionError("partner.statement_profile.additional_profiles must be a list")
+    ids = {str(nested(config, "partner.statement_profile.profile.id", "") or "")}
+    for index, item in enumerate(extra):
+        at = f"partner.statement_profile.additional_profiles[{index}]"
+        profile = item.get("profile") if isinstance(item, dict) else None
+        if not isinstance(profile, dict) or not profile.get("id") or not profile.get("standard") or not profile.get("accounts"):
+            raise ProvisionError(f"{at} needs sample_file and a profile with id, standard and accounts")
+        if profile["id"] in ids:
+            raise ProvisionError(f"{at}: profile id {profile['id']} appears twice")
+        ids.add(profile["id"])
+        if not item.get("sample_file") or not Path(str(item["sample_file"])).expanduser().is_file():
+            raise ProvisionError(f"{at}.sample_file does not exist: {item.get('sample_file')}")
+    trust = str(nested(config, "simulator.trust_statement_profile", "") or "").strip()
+    if trust and trust not in {str(item["profile"]["id"]) for item in extra}:
+        raise ProvisionError("simulator.trust_statement_profile must name one of partner.statement_profile.additional_profiles")
+
+
+def validate_safeguarding_accounts(config: dict[str, Any]) -> None:
+    accounts = nested(config, "partner.safeguarding_accounts", []) or []
+    if not isinstance(accounts, list):
+        raise ProvisionError("partner.safeguarding_accounts must be a list")
+    for index, row in enumerate(accounts):
+        if not isinstance(row, dict) or not str(row.get("account", "")).strip() or \
+                not re.fullmatch(r"[A-Za-z]{3}", str(row.get("currency", "")).strip()):
+            raise ProvisionError(f"partner.safeguarding_accounts[{index}] needs account and a 3-letter currency")
 
 
 def extract_one_time_key(which: str, page: str) -> str:
@@ -737,30 +774,78 @@ class Provisioner:
         self.save()
         return token_value
 
+    def statement_profiles(self) -> list[tuple[dict[str, Any], Path]]:
+        """The partner's statement profiles with their samples: the main one
+        (certification's CSV) first, then partner.statement_profile.additional_profiles."""
+        wanted = [(dict(nested(self.config, "partner.statement_profile.profile") or {}),
+                   Path(str(nested(self.config, "partner.statement_profile.sample_file"))).expanduser())]
+        for item in nested(self.config, "partner.statement_profile.additional_profiles", []) or []:
+            wanted.append((dict(item["profile"]), Path(str(item["sample_file"])).expanduser()))
+        return wanted
+
     def ensure_statement_profile(self, psp_key: str) -> None:
-        self.step(f"validate and install {self.name} statement profile")
+        """Installs the statement profiles the Gateway does not have yet.
+
+        The Gateway takes the whole list at once: the profiles it has stay as
+        they are, each missing one is previewed with its sample (it must
+        parse) and added.
+        """
+        wanted = self.statement_profiles()
+        self.step(f"validate and install {self.name} statement profiles "
+                  f"({', '.join(str(profile.get('id')) for profile, _ in wanted)})")
         if self.dry_run:
             return
         psp_id = self.state["psp_id"]
         partner = self.partner_api(psp_key)
+        current: list[dict[str, Any]] = []
         try:
-            _, current, _ = partner.call("GET", f"/psps/{psp_id}/statement-profiles")
-            if current.get("profiles"):
-                self.state["statement_profile_id"] = current["profiles"][0]["id"]
-                self.save()
-                return
+            _, listed, _ = partner.call("GET", f"/psps/{psp_id}/statement-profiles")
+            current = list(listed.get("profiles") or [])
         except ProvisionError as error:
             if "HTTP 404" not in str(error):
                 raise
-        profile = dict(nested(self.config, "partner.statement_profile.profile"))
-        sample_path = Path(str(nested(self.config, "partner.statement_profile.sample_file"))).expanduser()
-        preview = partner.multipart(f"/psps/{psp_id}/statement-profiles/preview",
-                                    {"profile": json.dumps(profile)}, {"sample": sample_path})
-        profile["sample_file_id"] = preview["sample_file_id"]
-        partner.call("PUT", f"/psps/{psp_id}/statement-profiles", {
-            "profiles": [profile], "reason": f"{self.name} cash-deposit reconciliation profile",
-        })
-        self.state["statement_profile_id"] = profile["id"]
+        installed = {row.get("id") for row in current}
+        missing = [(profile, sample) for profile, sample in wanted if profile.get("id") not in installed]
+        if missing:
+            for profile, sample in missing:
+                preview = partner.multipart(f"/psps/{psp_id}/statement-profiles/preview",
+                                            {"profile": json.dumps(profile)}, {"sample": sample})
+                profile["sample_file_id"] = preview["sample_file_id"]
+            reason = f"{self.name} cash-deposit reconciliation profile" if not current else \
+                f"{self.name} statement profiles: add {', '.join(str(p['id']) for p, _ in missing)}"
+            partner.call("PUT", f"/psps/{psp_id}/statement-profiles", {
+                "profiles": current + [profile for profile, _ in missing], "reason": reason,
+            })
+        self.state["statement_profile_id"] = wanted[0][0].get("id") or (current[0]["id"] if current else "")
+        self.state["statement_profile_ids"] = [row.get("id") for row in current] + [p.get("id") for p, _ in missing]
+        trust = str(nested(self.config, "simulator.trust_statement_profile", "") or "").strip()
+        if trust:
+            self.state["trust_statement_profile_id"] = trust
+        self.save()
+
+    def ensure_safeguarding_accounts(self) -> None:
+        """Registers the partner's accounts that hold client funds as the
+        Gateway's safeguarding accounts, once: their statements' closing
+        balances are the daily safeguarding check's money held."""
+        accounts = nested(self.config, "partner.safeguarding_accounts", []) or []
+        if not accounts:
+            return
+        self.step("register safeguarding accounts " + ", ".join(
+            f"{row['account']} ({str(row['currency']).upper()})" for row in accounts))
+        if self.dry_run:
+            return
+        _, listed, _ = self.admin.call("GET", "/admin/safeguarding/accounts")
+        have = {row.get("account") for row in (listed.get("data") or [] if isinstance(listed, dict) else [])}
+        for row in accounts:
+            account = str(row["account"]).strip()
+            if account in have:
+                continue
+            self.admin.call("POST", "/admin/safeguarding/accounts", {
+                "account": account, "currency": str(row["currency"]).strip().upper(),
+                "bank": str(row.get("bank", "") or self.name).strip(),
+            })
+            have.add(account)
+        self.state["safeguarding_accounts"] = [str(row["account"]).strip() for row in accounts]
         self.save()
 
     def partner_api(self, key: str) -> "HTTP":
@@ -810,6 +895,10 @@ class Provisioner:
             return
         body = {"gateway_key": key, "mode": mode,
                 "statement_profile_id": self.state.get("statement_profile_id", "")}
+        # The trust account's statement (camt.053, with its balances) goes
+        # under its own profile.
+        if self.state.get("trust_statement_profile_id"):
+            body["trust_statement_profile_id"] = self.state["trust_statement_profile_id"]
         if self.secret_values.get(f"{mode}_webhook_secret"):
             body["webhook_secret"] = self.secret_values[f"{mode}_webhook_secret"]
         simulator.call("PUT", "/api/partner/setup", body)
@@ -875,6 +964,13 @@ class Provisioner:
         psp_id = self.state["psp_id"]
         psp = self.psp()
         if psp.get("certified_at"):
+            # Profiles added to the YAML since certification are installed
+            # with the sandbox key kept from it.
+            if self.secret_values.get("sandbox_api_key"):
+                try:
+                    self.ensure_statement_profile(self.secret_values["sandbox_api_key"])
+                except ProvisionError as error:
+                    log(f"WARN  {self.name}'s statement profiles were not brought up to date: {error}")
             return True
         if psp.get("status") == "commercial_setup":
             self.transition("technical_setup", f"Open {self.name} sandbox technical setup")
@@ -1041,6 +1137,9 @@ class Provisioner:
             "psp_id": self.state.get("psp_id"), "application_id": self.state.get("application_id"),
             "test_business_account_id": self.state.get("test_business_account_id"),
             "statement_profile_id": self.state.get("statement_profile_id"),
+            "statement_profile_ids": self.state.get("statement_profile_ids", []),
+            "trust_statement_profile_id": self.state.get("trust_statement_profile_id"),
+            "safeguarding_accounts": self.state.get("safeguarding_accounts", []),
             "launch_matrix_version": self.state.get("launch_matrix_version"),
             "live_cash_deposit_route_enabled": self.state.get("live_cash_deposit_route_enabled", False),
             "certification": self.state.get("certification_run"),
@@ -1069,6 +1168,7 @@ class Provisioner:
         self.ensure_kyb()
         self.ensure_commercial()
         self.ensure_capabilities()
+        self.ensure_safeguarding_accounts()
         if not self.ensure_certification():
             self.report("waiting_for_certification")
             return 3
@@ -1095,8 +1195,8 @@ class Provisioner:
             if status != 200:
                 raise ProvisionError(f"Keycloak admin login failed during preflight: HTTP {status}")
         for action in (self.verify_launch_matrix, self.ensure_users, self.ensure_test_business, self.ensure_application,
-                       self.ensure_kyb, self.ensure_commercial, self.ensure_capabilities, self.ensure_certification,
-                       self.ensure_pilot):
+                       self.ensure_kyb, self.ensure_commercial, self.ensure_capabilities,
+                       self.ensure_safeguarding_accounts, self.ensure_certification, self.ensure_pilot):
             action()
         self.report("plan_valid")
         return 0

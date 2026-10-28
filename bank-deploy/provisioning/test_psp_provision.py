@@ -303,6 +303,137 @@ class PSPProvisionTests(unittest.TestCase):
         self.assertEqual(psp.route_text(psp.launch_routes(loaded)[0]),
                          "incoming_transfer/partner_api/deposit_reference/live/acc_top")
 
+        # The trust account: its camt.053 profile beside the CSV one, handed to
+        # the simulator, and the Gateway's safeguarding account.
+        extra = loaded["partner"]["statement_profile"]["additional_profiles"]
+        self.assertEqual([item["profile"]["id"] for item in extra], ["simbank-trust-eod"])
+        self.assertTrue(Path(extra[0]["sample_file"]).is_file())
+        self.assertEqual(extra[0]["profile"]["cutoff"], "16:00")
+        self.assertEqual(loaded["simulator"]["trust_statement_profile"], "simbank-trust-eod")
+        self.assertEqual(loaded["partner"]["safeguarding_accounts"],
+                         [{"account": "SIMBANK-TRUST-001", "currency": "MZN", "bank": "Banco Simulado KulPay"}])
+
+    def test_the_fnb_example_documents_the_new_keys_empty(self):
+        if psp.yaml is None:
+            self.skipTest("PyYAML is tested in the provisioner image")
+        raw = psp.yaml.safe_load(MODULE.with_name("fnb-pilot.example.yaml").read_text())
+        self.assertEqual(raw["partner"]["statement_profile"]["additional_profiles"], [])
+        self.assertEqual(raw["partner"]["safeguarding_accounts"], [])
+
+    def test_additional_profiles_resolve_beside_the_yaml_and_are_checked(self):
+        if psp.yaml is None:
+            self.skipTest("PyYAML is tested in the provisioner image")
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            config = self.valid_config(root)
+            (root / "trust.xml").write_text("<Document/>")
+            config["partner"]["statement_profile"]["profile"]["id"] = "main"
+            config["partner"]["statement_profile"]["additional_profiles"] = [
+                {"sample_file": "trust.xml", "profile": {"id": "trust", "standard": "camt.053", "accounts": ["T-1"]}}]
+            config["simulator"] = {"trust_statement_profile": "trust"}
+            config["partner"]["safeguarding_accounts"] = [{"account": "T-1", "currency": "mzn"}]
+            loaded = self.load(root, config)
+            self.assertEqual(loaded["partner"]["statement_profile"]["additional_profiles"][0]["sample_file"],
+                             str(root / "trust.xml"))
+            config["simulator"]["trust_statement_profile"] = "other"
+            with self.assertRaisesRegex(psp.ProvisionError, "trust_statement_profile"):
+                self.load(root, config)
+            config["simulator"]["trust_statement_profile"] = "trust"
+            config["partner"]["safeguarding_accounts"] = [{"account": "T-1"}]
+            with self.assertRaisesRegex(psp.ProvisionError, "3-letter currency"):
+                self.load(root, config)
+
+    def test_missing_statement_profiles_are_installed_beside_the_existing(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "main.csv").write_text("csv")
+            (root / "trust.xml").write_text("xml")
+            config = {"simulator": {"trust_statement_profile": "trust"}, "partner": {"short_name": "SIMBANK", "statement_profile": {
+                "sample_file": str(root / "main.csv"), "profile": {"id": "main", "standard": "csv"},
+                "additional_profiles": [{"sample_file": str(root / "trust.xml"),
+                                         "profile": {"id": "trust", "standard": "camt.053"}}]}}}
+            provisioner = psp.Provisioner(config, root)
+            provisioner.state["psp_id"] = "psp-1"
+            installed: list = [{"id": "main", "standard": "csv", "sample_file_id": "file_main"}]
+            calls: list = []
+
+            class API:
+                def call(self, method, path, body=None, **_kwargs):
+                    calls.append((method, path, body))
+                    if method == "GET":
+                        return 200, {"version": 1, "profiles": list(installed)}, {}
+                    installed[:] = body["profiles"]
+                    return 201, {"version": 2}, {}
+
+                def multipart(self, path, fields, files, **_kwargs):
+                    calls.append(("POST", path, json.loads(fields["profile"])["id"], files["sample"].read_text()))
+                    return {"sample_file_id": "file_" + json.loads(fields["profile"])["id"]}
+
+            provisioner.partner_api = lambda key: API()
+            provisioner.ensure_statement_profile("key")
+            self.assertEqual([p["id"] for p in installed], ["main", "trust"])
+            self.assertEqual(installed[1]["sample_file_id"], "file_trust")
+            self.assertEqual([c for c in calls if c[1].endswith("/preview")],
+                             [("POST", "/psps/psp-1/statement-profiles/preview", "trust", "xml")])
+            self.assertEqual(provisioner.state["statement_profile_id"], "main")
+            self.assertEqual(provisioner.state["trust_statement_profile_id"], "trust")
+            # Nothing missing: nothing is put again.
+            calls.clear()
+            provisioner.ensure_statement_profile("key")
+            self.assertEqual([c[0] for c in calls], ["GET"])
+
+            # The simulator is handed both profiles.
+            handed: list = []
+
+            class Simulator:
+                def call(self, method, path, body=None, **_kwargs):
+                    handed.append((method, path, body))
+                    return 200, {}, {}
+
+            provisioner.simulator = lambda: Simulator()
+            provisioner.hand_to_simulator("live", "kp_live_rk_x")
+            self.assertEqual(handed[0][1], "/api/partner/setup")
+            self.assertEqual(handed[0][2]["statement_profile_id"], "main")
+            self.assertEqual(handed[0][2]["trust_statement_profile_id"], "trust")
+
+    def test_a_certified_partner_gets_profiles_added_since(self):
+        with tempfile.TemporaryDirectory() as directory:
+            provisioner = psp.Provisioner({"partner": {"short_name": "SIMBANK"}}, Path(directory))
+            provisioner.state["psp_id"] = "psp-1"
+            provisioner.secret_values["sandbox_api_key"] = "kp_test_sk_" + "A" * 49
+            provisioner.psp = lambda: {"id": "psp-1", "certified_at": "now"}
+            used: list = []
+            provisioner.ensure_statement_profile = lambda key: used.append(key)
+            self.assertTrue(provisioner.ensure_certification())
+            self.assertEqual(used, ["kp_test_sk_" + "A" * 49])
+
+    def test_safeguarding_accounts_are_registered_once(self):
+        with tempfile.TemporaryDirectory() as directory:
+            provisioner = psp.Provisioner({"partner": {"short_name": "SIMBANK", "safeguarding_accounts": [
+                {"account": "SIMBANK-TRUST-001", "currency": "mzn", "bank": "Banco Simulado KulPay"}]}}, Path(directory))
+            registered: list = []
+
+            class Admin:
+                def call(self, method, path, body=None, **_kwargs):
+                    assert path == "/admin/safeguarding/accounts", path
+                    if method == "GET":
+                        return 200, {"data": list(registered), "total": len(registered)}, {}
+                    registered.append(body)
+                    return 201, dict(body, id="sga_1"), {}
+
+            provisioner.admin = Admin()
+            provisioner.ensure_safeguarding_accounts()
+            provisioner.ensure_safeguarding_accounts()
+            self.assertEqual(registered, [{"account": "SIMBANK-TRUST-001", "currency": "MZN", "bank": "Banco Simulado KulPay"}])
+            provisioner.report("pilot_ready")
+            report = json.loads((Path(directory) / "readiness-report.json").read_text())
+            self.assertEqual(report["safeguarding_accounts"], ["SIMBANK-TRUST-001"])
+
+            # Plan mode only says what it would register.
+            planning = psp.Provisioner(provisioner.config, Path(directory) / "plan", dry_run=True)
+            planning.admin = None
+            planning.ensure_safeguarding_accounts()
+
 
 if __name__ == "__main__":
     unittest.main()

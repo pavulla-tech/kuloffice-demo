@@ -17,11 +17,14 @@ deployment:
   stop_at: pilot
   output_directory: /output
 
-# The simulator plays the bank: the provisioner hands it its keys and webhook
-# secrets (PUT /api/partner/setup) and asks it for the statement
-# certification needs (POST /api/partner/certification-statement).
+# The simulator plays the bank: the provisioner hands it its keys, webhook
+# secrets and statement profiles (PUT /api/partner/setup) and asks it for the
+# statement certification needs (POST /api/partner/certification-statement).
+# Its trust account's daily statement goes as camt.053 under
+# trust_statement_profile (one of the additional profiles below).
 simulator:
   url: http://simulator:8085
+  trust_statement_profile: simbank-trust-eod
 
 operators:
   # Dev already has its operators; the Gateway admin and checker keys act.
@@ -157,6 +160,32 @@ partner:
         counterparty: counterparty
         depositor_ref: depositor_reference
         fee: fee
+    # The trust account's end-of-day statement: camt.053 with its opening and
+    # closing balances, which the daily safeguarding check reads. The sample
+    # is the simulator's own rendering (no real data). Its cut-off is before
+    # the Gateway's 18:00 UTC check.
+    additional_profiles:
+      - sample_file: simulator-bank/sample-trust-statement.xml
+        profile:
+          id: simbank-trust-eod
+          standard: camt.053
+          direction: push
+          channel: api_upload
+          frequency: daily
+          cutoff: "16:00"
+          timezone: Africa/Maputo
+          arrival_window: 2h
+          granularity: transaction
+          security:
+            checksum: sha256
+          acknowledgement: api
+          currency: MZN
+          accounts: [SIMBANK-TRUST-001]
+
+  # The trust account holds KulPay's client funds: the Gateway's
+  # safeguarding account, its closing balance the money held.
+  safeguarding_accounts:
+    - {account: SIMBANK-TRUST-001, currency: MZN, bank: Banco Simulado KulPay}
 
   # The live routes KulPay serves through this bank: incoming transfers by
   # reference and cash deposits (the dev kit's launch matrix enables both).
