@@ -225,6 +225,13 @@ class PSPProvisionTests(unittest.TestCase):
         provisioner.admin = Gateway()
         provisioner.ensure_statement_profile = lambda key: None
         provisioner.ensure_webhook_endpoint = lambda mode, key: None
+
+        class PartnerAPI:  # a payment partner's run: no tasks for it
+            def call(self, method, path, body=None, **_kwargs):
+                calls.append(("partner", method, path, body))
+                raise psp.ProvisionError(f"{method} {path} failed: HTTP 404: no run")
+
+        provisioner.partner_api = lambda key: PartnerAPI()
         return provisioner, calls
 
     def test_the_simulator_bank_answers_the_second_round(self):
@@ -252,6 +259,80 @@ class PSPProvisionTests(unittest.TestCase):
             self.assertEqual(runs[0][4]["statement"], "sample")
             self.assertEqual(runs[1][3], {"rerun_of": "run-1"})
             self.assertIn("mock_1,100,MZN", runs[1][4]["statement"])
+
+    def test_the_simulator_bank_does_the_run_tasks_right_after_the_start(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "sample.csv").write_text("sample")
+            config = {"simulator": {"url": "http://simulator:8085"},
+                      "partner": {"short_name": "SIMBANK", "statement_profile": {"sample_file": str(root / "sample.csv")}}}
+            provisioner, calls = self.certifying(root, config)
+
+            class Simulator:
+                def call(self, method, path, body=None, **_kwargs):
+                    calls.append(("simulator", method, path, body))
+                    if path == "/api/partner/certification/act":
+                        return 200, {"run_id": "run-1", "results": [
+                            {"key": "incoming/transfer", "outcome": "performed", "calls": [{"status": 201}]}]}, {}
+                    if path == "/api/partner/certification-statement":
+                        return 200, "reference,amount,currency,date\nmock_1,100,MZN,2026-10-28\n", {}
+                    return 200, {}, {}
+
+            provisioner.simulator = lambda: Simulator()
+            with mock.patch.object(psp, "log") as logged:
+                self.assertTrue(provisioner.ensure_certification())
+            order = [c[:3] for c in calls]
+            starts = [i for i, c in enumerate(calls) if c[0] == "gateway" and len(c) == 5]
+            acts = [i for i, c in enumerate(order) if c == ("simulator", "POST", "/api/partner/certification/act")]
+            waits = [i for i, c in enumerate(order) if c[:2] == ("gateway", "GET") and "/runs/" in c[2]]
+            # Once per run, after its start and before its first wait.
+            self.assertEqual(len(acts), 2)
+            self.assertTrue(starts[0] < acts[0] < waits[0] < starts[1] < acts[1])
+            self.assertTrue(any("incoming/transfer: performed HTTP 201" in str(c) for c in logged.call_args_list))
+            self.assertFalse(any(c[0] == "partner" for c in calls))
+
+    def test_a_real_bank_is_shown_the_run_tasks(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "sample.csv").write_text("sample")
+            config = {"partner": {"short_name": "FNB", "statement_profile": {"sample_file": str(root / "sample.csv")}}}
+            provisioner, calls = self.certifying(root, config)
+            tasks = {"run_id": "run-1", "status": "running", "deadline": "2026-10-28T12:10:00Z", "tasks": [
+                {"key": "incoming/name_lookup", "action": "name_lookup", "method": "/v1/name-lookups",
+                 "destination": {"type": "alias", "value": "258841234567"}, "currency": "MZN", "done": True},
+                {"key": "incoming/transfer", "action": "incoming_transfer", "destination": {"type": "deposit_reference", "value": "AG-1"},
+                 "amount_minor": 1234, "currency": "MZN", "partner_reference": "CERT-1", "final": True, "done": False}]}
+            keys: list = []
+
+            class PartnerAPI:
+                def call(self, method, path, body=None, **_kwargs):
+                    calls.append(("partner", method, path, body))
+                    return 200, tasks, {}
+
+            def partner_api(key):
+                keys.append(key)
+                return PartnerAPI()
+
+            provisioner.partner_api = partner_api
+            with mock.patch.object(psp, "log") as logged:
+                self.assertFalse(provisioner.ensure_certification())
+            self.assertEqual(keys, ["kp_test_sk_" + "A" * 49])
+            self.assertEqual([c[:3] for c in calls if c[0] == "partner"], [("partner", "GET", "/certification/tasks")])
+            self.assertEqual(json.loads((root / "certification-tasks.json").read_text()), tasks)
+            lines = [str(c.args[0]) for c in logged.call_args_list]
+            self.assertEqual(len([line for line in lines if line.startswith("WAIT  FNB does these sandbox tasks")]), 1)
+            self.assertTrue(any("incoming/transfer: incoming_transfer to deposit_reference AG-1, 1234 MZN, reference CERT-1" in line
+                                for line in lines))
+            self.assertFalse(any("incoming/name_lookup" in line for line in lines))
+
+    def test_the_statement_round_lists_the_partner_task_payments(self):
+        # The Gateway keeps its wording; an incoming-funding run's payments are
+        # its transfers' and deposits' references and amounts.
+        cases = [{"kind": "statement", "status": "failed", "actual":
+                  "upload a sample statement (CSV: reference, amount, currency, date) listing: CERT-run1-1 12.34 MZN; CERT-run1-2 12.34 MZN"}]
+        self.assertEqual(psp.statement_payments(cases), [
+            {"reference": "CERT-run1-1", "amount": "12.34", "currency": "MZN"},
+            {"reference": "CERT-run1-2", "amount": "12.34", "currency": "MZN"}])
 
     def test_a_real_bank_is_asked_for_its_statement(self):
         with tempfile.TemporaryDirectory() as directory:

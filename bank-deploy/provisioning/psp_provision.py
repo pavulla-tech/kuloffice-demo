@@ -944,6 +944,55 @@ class Provisioner:
             return run
         return self.admin.multipart(f"/admin/psps/{psp_id}/certification/runs", fields, {"statement": statement})
 
+    def partner_tasks(self, run_id: str, sandbox_key: str) -> None:
+        """Gets the partner to do the run's tasks, if it has any.
+
+        An incoming-funding run (a bank taking deposits and transfers for
+        KulPay accounts) waits for the partner to do tasks in the sandbox: a
+        name lookup, an incoming transfer and its replay, a cash deposit. The
+        simulator bank is asked to do them at once (it also does them on its
+        own); a real bank's are printed and written to
+        certification-tasks.json, for it to do before their deadline.
+        """
+        simulator = self.simulator()
+        if simulator is not None:
+            try:
+                _, done, _ = simulator.call("POST", "/api/partner/certification/act")
+            except ProvisionError as error:
+                if "HTTP 409" not in str(error):  # 409: the run has no partner tasks
+                    log(f"WARN  the simulator did not do the certification tasks: {error}")
+                return
+            for result in (done.get("results", []) if isinstance(done, dict) else []):
+                statuses = ", ".join(str(c.get("status")) for c in result.get("calls", []))
+                log(f"      {result.get('key')}: {result.get('outcome')}"
+                    + (f" ({result['reason']})" if result.get("reason") else "")
+                    + (f" HTTP {statuses}" if statuses else ""))
+            return
+        try:
+            _, tasks, _ = self.partner_api(sandbox_key).call("GET", "/certification/tasks")
+        except ProvisionError as error:
+            if "HTTP 404" not in str(error):  # 404: no partner tasks running
+                log(f"WARN  the certification tasks could not be read: {error}")
+            return
+        open_tasks = [t for t in (tasks.get("tasks", []) if isinstance(tasks, dict) else []) if not t.get("done")]
+        if not open_tasks:
+            return
+        atomic_json(self.output / "certification-tasks.json", tasks, mode=0o644)
+        log(f"WAIT  {self.name} does these sandbox tasks with its test key before {tasks.get('deadline', 'the deadline')} "
+            f"(run {run_id}; see {self.output / 'certification-tasks.json'}):")
+        for task in open_tasks:
+            destination = task.get("destination") or {}
+            amount = task.get("amount") or task.get("amount_minor", "")
+            log(f"      {task.get('key')}: {task.get('action')} to {destination.get('type', '')} {destination.get('value', '')}"
+                + (f", {amount} {task.get('currency', '')}" if amount != "" else "")
+                + (f", reference {task['partner_reference']}" if task.get("partner_reference") else "")
+                + (f", via {task['method']}" if task.get("method") else ""))
+
+    def start_and_wait(self, sandbox_key: str, rerun_of: str = "", statement: Path | None = None) -> dict[str, Any]:
+        run = self.start_run(rerun_of=rerun_of, statement=statement)
+        self.partner_tasks(run["id"], sandbox_key)
+        return self.wait_run(run["id"])
+
     def wait_run(self, run_id: str) -> dict[str, Any]:
         psp_id = self.state["psp_id"]
         deadline = time.monotonic() + 35 * 60
@@ -959,7 +1008,8 @@ class Provisioner:
     def ensure_certification(self) -> bool:
         """Runs certification in rounds until it passes or waits on someone.
 
-        Round 1 runs every case with the sample statement. A failed statement
+        Round 1 runs every case with the sample statement; an incoming-funding
+        partner does the run's tasks meanwhile (partner_tasks). A failed statement
         case names the run's sandbox payments; with the bank's statement
         listing them, round 2 repeats the failed cases and carries the passed
         ones (and their payments). Any other failed mandatory case waits for
@@ -995,12 +1045,13 @@ class Provisioner:
         # may have corrected its integration since.
         resumed = False
         if latest is not None and latest.get("status") == "running":
+            self.partner_tasks(latest["id"], sandbox_key)
             view = self.wait_run(latest["id"])
         elif latest is not None and latest.get("status") == "failed":
             _, view, _ = self.admin.call("GET", f"/admin/psps/{psp_id}/certification/runs/{latest['id']}")
             resumed = True
         else:
-            view = self.wait_run(self.start_run()["id"])
+            view = self.start_and_wait(sandbox_key)
         for _ in range(3):
             if view["run"].get("status") == "passed":
                 return bool(self.psp().get("certified_at"))
@@ -1016,7 +1067,7 @@ class Provisioner:
                 break
             resumed = False
             log("==    repeat the failed cases" + (" with the bank's statement" if statement else ""))
-            view = self.wait_run(self.start_run(rerun_of=view["run"]["id"], statement=statement)["id"])
+            view = self.start_and_wait(sandbox_key, rerun_of=view["run"]["id"], statement=statement)
         if view["run"].get("status") == "passed":
             return bool(self.psp().get("certified_at"))
         failed = failed_cases_other_than_statement(view.get("cases", [])) or ["statement/sample"]

@@ -57,10 +57,20 @@ and run `apply` again: it repeats the failed cases with that statement and
 keeps the passed ones. FNB's live webhook endpoint (`partner.webhooks.live_url`)
 is registered on entering the pilot.
 
+A bank that takes deposits and transfers for KulPay accounts (incoming
+funding) also performs tasks during each run: with its sandbox key it does a
+name lookup, reports an incoming transfer, reports it again, and takes a cash
+deposit (intent and confirmation), each within the run's deadline (about 10
+minutes). The provisioner prints the tasks as `WAIT` lines when it starts the
+run and writes them to `fnb-pilot-output/certification-tasks.json`
+(`GET /v1/certification/tasks` with the sandbox key lists them too). Their
+transfers and deposits are the payments the statement round then names.
+
 The KulPay dev kit runs the same provisioner with the PSP simulator as the
 bank (`simulator-bank.example.yaml`, `make simulator-bank` in `deploy/`): the
-simulator receives its keys and webhook secrets and answers the statement
-round itself.
+simulator receives its keys and webhook secrets, does the run's tasks itself
+(asked right after each start, and on its own every 30 s) and answers the
+statement round itself.
 
 A bank holding KulPay's client funds sends one more statement: its trust
 account's end of day, with opening and closing balances (camt.053), which the
