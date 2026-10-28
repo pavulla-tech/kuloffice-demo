@@ -274,9 +274,13 @@ services:
       # Cards read at a KulPay terminal (TDES DUKPT): the software HSM opens
       # them from a test BDK, for dev against the mock SIMO only. Empty: no
       # HSM, terminal cards are refused. ALLOW_LIVE lets it serve this live-
-      # mode gateway. Production has a hardware HSM instead.
+      # mode gateway (on in this dev kit). Production has a hardware HSM instead.
       KULPAY_HSM_SOFT_BDK: ${GATEWAY_HSM_SOFT_BDK:-}
-      KULPAY_HSM_ALLOW_LIVE: ${GATEWAY_HSM_ALLOW_LIVE:-false}
+      KULPAY_HSM_ALLOW_LIVE: ${GATEWAY_HSM_ALLOW_LIVE:-true}
+      # One operator prepares and decides every four-eyes request on this dev
+      # stack, as KulOffice and the portal (the same .env switch). Never in
+      # production.
+      KULPAY_APPROVALS_SINGLE_OPERATOR: ${KULOFFICE_APPROVALS_SINGLE_OPERATOR:-true}
       KULPAY_ADDR: ":9090"
       KULPAY_MGMT_ADDR: ":9091"
       # A payment link may send the payer back to the KulPay web app once paid
@@ -321,8 +325,10 @@ services:
       # other containers on the network are not trusted.
       KULPAY_TRUSTED_PROXIES: ${KULPAY_TRUSTED_PROXIES:-127.0.0.0/8,::1/128,${STACK_GATEWAY:-10.250.0.1}}
       # Every rail is a database binding (gateway-bind). Operator-confirmed
-      # "manual" payments would be money that never crossed a rail: off.
-      KULPAY_CONNECTORS_MANUAL_ENABLED: "false"
+      # "manual" payments are money that never crossed a rail: on in this dev
+      # kit so they can be tested (owner 2026-10-28: nothing is off on dev),
+      # never in a production kit.
+      KULPAY_CONNECTORS_MANUAL_ENABLED: ${GATEWAY_CONNECTORS_MANUAL_ENABLED:-true}
       # What the credentials page adds to a merchant's own M-Pesa, e-Mola or
       # card credentials: the provider's address, timeout and language, as
       # JSON (driver -> live|test -> key -> value). Set in .env: the simulator
@@ -651,7 +657,8 @@ services:
       # BLNK bootstrap's @KulPay_<env>_GatewayBills_MZN.
       KULOFFICE_GATEWAY_BILLS_ENABLED: ${KULOFFICE_GATEWAY_BILLS_ENABLED:-false}
       KULOFFICE_GATEWAY_BILLS_OFFERING_ID: ${KULOFFICE_GATEWAY_BILLS_OFFERING_ID:-}
-      KULOFFICE_APPROVALS_SINGLE_OPERATOR: ${KULOFFICE_APPROVALS_SINGLE_OPERATOR:-false}
+      # One operator may propose and decide (dev only; the Gateway follows).
+      KULOFFICE_APPROVALS_SINGLE_OPERATOR: ${KULOFFICE_APPROVALS_SINGLE_OPERATOR:-true}
       # External bills and supply (and paying a business's Gateway bill from a
       # wallet) are on; the clearing balance is made by KulOffice's BLNK
       # bootstrap unless KULOFFICE_SUPPLY_CLEARING_BALANCE names one.
@@ -697,7 +704,7 @@ services:
       KULOFFICE_SOLANGE_WEB_URL: ${WEB_PUBLIC_URL}
       KULOFFICE_SOLANGE_PUBLIC_API_URL: ${KULOFFICE_PUBLIC_URL}
       KULOFFICE_SOLANGE_LOGO_BUCKET: ${LOGO_BUCKET:-logos}
-      KULOFFICE_SOLANGE_PERSONAL_PAYMENT_REQUESTS: ${PERSONAL_PAYMENT_REQUESTS:-false}
+      KULOFFICE_SOLANGE_PERSONAL_PAYMENT_REQUESTS: ${PERSONAL_PAYMENT_REQUESTS:-true}
       # The public lookup believes forwarded addresses from Apache (the
       # gateway) and the web app (the stack's network) only.
       KULOFFICE_SOLANGE_TRUSTED_PROXIES: ${STACK_GATEWAY:-10.250.0.1},${STACK_SUBNET:-10.250.0.0/24}

@@ -159,11 +159,10 @@ partner:
         fee: fee
 
   # The live routes KulPay serves through this bank: incoming transfers by
-  # reference. Cash deposits are off in live by default; once the launch
-  # matrix enables them, add
-  #   {operation: cash_deposit, driver: partner_api, method: cash, mode: live, scope: acc_top}
+  # reference and cash deposits (the dev kit's launch matrix enables both).
   launch_routes:
     - {operation: incoming_transfer, driver: partner_api, method: deposit_reference, mode: live, scope: acc_top}
+    - {operation: cash_deposit, driver: partner_api, method: cash, mode: live, scope: acc_top}
 
 pilot:
   routing_weight: 100

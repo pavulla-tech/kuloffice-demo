@@ -1,6 +1,6 @@
 {
-  "version": "2026-10-12.3+kit-cash-deposits",
-  "description": "Launch capability matrix (KulOffice integration plan, phase 10 item 9 and section 16.1-2; design section 7.1). Every route that may execute: operation x connector driver x method x mode x movement scope. A route not listed as enabled is refused before any limit is reserved or any provider is called (422 route_not_enabled); off_net is refused outright (422 movement_scope_disabled) and cannot be enabled here. This default enables what the gateway executed before the matrix existed, except the simulated fleet (driver mock) in live mode, disabled for launch by the owner on 2026-10-12: live charges, payouts and name lookups run only on real connectors; test mode keeps the simulated fleet. Since 2026-10-12.3 cash deposits (operation cash_deposit) are listed: disabled in live mode, enabled in test mode. Development kit (kuloffice-demo, owner 2026-10-20): live cash deposits enabled, so partner deposits credit KulPay accounts on the dev server.",
+  "version": "2026-10-28.1+kit-dev-all-on",
+  "description": "Launch capability matrix (KulOffice integration plan, phase 10 item 9 and section 16.1-2; design section 7.1). Every route that may execute: operation x connector driver x method x mode x movement scope. A route not listed as enabled is refused before any limit is reserved or any provider is called (422 route_not_enabled); off_net is refused outright (422 movement_scope_disabled) and cannot be enabled here. This default enables what the gateway executed before the matrix existed, except the simulated fleet (driver mock) in live mode, disabled for launch by the owner on 2026-10-12: live charges, payouts and name lookups run only on real connectors; test mode keeps the simulated fleet. Since 2026-10-12.3 cash deposits (operation cash_deposit) are listed: disabled in live mode, enabled in test mode. Development kit (kuloffice-demo, owner 2026-10-20): live cash deposits enabled, so partner deposits credit KulPay accounts on the dev server. Since 2026-10-28.1 (owner: nothing is off on dev): every route the gateway can run is enabled, the simulated fleet in live mode included, and cards through SIMO are listed; only off_net and the generic external-to-external transfer stay off: the gateway refuses to load a matrix that enables them.",
   "routes": [
     {
       "operation": "charge",
@@ -68,6 +68,23 @@
       ],
       "enabled": true,
       "note": "Card acquiring through the acquirer's hosted fields; as mpesa."
+    },
+    {
+      "operation": "charge",
+      "driver": "simo",
+      "methods": [
+        "card"
+      ],
+      "modes": [
+        "live",
+        "test"
+      ],
+      "scopes": [
+        "acc_top",
+        "orch_net"
+      ],
+      "enabled": true,
+      "note": "Cards through SIMO (KulPay terminals and the checkout card field); on dev the PSP simulator plays SIMO, the bank and the HSM."
     },
     {
       "operation": "charge",
@@ -143,8 +160,8 @@
         "acc_top",
         "orch_net"
       ],
-      "enabled": false,
-      "note": "Owner decision 2026-10-12: the simulated fleet does not serve live-mode charges at launch; a live charge runs only on a real connector (a live request that would fall to the simulated default, or a live mock binding, is refused route_not_enabled)."
+      "enabled": true,
+      "note": "Owner decision 2026-10-12: the simulated fleet does not serve live-mode charges at launch; a live charge runs only on a real connector (a live request that would fall to the simulated default, or a live mock binding, is refused route_not_enabled). Development kit: enabled (owner 2026-10-28: nothing is off on dev)."
     },
     {
       "operation": "payout",
@@ -236,9 +253,10 @@
       "scopes": [
         "legacy_payout"
       ],
-      "enabled": false,
+      "enabled": true,
       "legacy": true,
-      "owner_decision": "Decided 2026-10-12: the simulated fleet does not pay out in live mode at launch. (legacy_payout rows are flagged legacy until the phase 0 payout decision.)"
+      "owner_decision": "Decided 2026-10-12: the simulated fleet does not pay out in live mode at launch. (legacy_payout rows are flagged legacy until the phase 0 payout decision.)",
+      "note": "Development kit: enabled (owner 2026-10-28: nothing is off on dev)."
     },
     {
       "operation": "payout",
@@ -361,8 +379,8 @@
       "scopes": [
         "none"
       ],
-      "enabled": false,
-      "note": "Owner decision 2026-10-12: the simulated fleet does not answer live-mode name lookups at launch."
+      "enabled": true,
+      "note": "Owner decision 2026-10-12: the simulated fleet does not answer live-mode name lookups at launch. Development kit: enabled (owner 2026-10-28: nothing is off on dev)."
     },
     {
       "operation": "incoming_transfer",
