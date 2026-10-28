@@ -1,0 +1,209 @@
+# The KulPay PSP simulator as a partner bank (development only).
+#
+# The same provisioner that brings a real bank (fnb-pilot.example.yaml) into
+# the Gateway brings in the simulator, so dev runs the pilot's path end to
+# end: application, KYB, commercial terms, capabilities, the webhook endpoint,
+# certification (the simulator answers it, statement included) and the pilot.
+# Its evidence is the placeholder beside this file; nothing here is secret.
+#
+#   cd deploy && make provision-simulator-bank
+
+schema_version: 1
+
+deployment:
+  country: MZ
+  currency: MZN
+  language: pt
+  stop_at: pilot
+  output_directory: /output
+
+# The simulator plays the bank: the provisioner hands it its keys and webhook
+# secrets (PUT /api/partner/setup) and asks it for the statement
+# certification needs (POST /api/partner/certification-statement).
+simulator:
+  url: http://simulator:8085
+
+operators:
+  # Dev already has its operators; the Gateway admin and checker keys act.
+  create_workforce_users: false
+  maker:
+    email: simulator-maker@kulpay.dev
+    first_name: Simulator
+    last_name: Maker
+  checker:
+    email: simulator-checker@kulpay.dev
+    first_name: Simulator
+    last_name: Checker
+  partner_technical:
+    email: simulator-bank@kulpay.dev
+    first_name: Simulator
+    last_name: Bank
+
+partner:
+  short_name: SIMBANK
+  legal_name: Banco Simulado KulPay (desenvolvimento)
+  registration_number: SIM-000001
+  partner_type: bank
+  licence:
+    type: bank
+    number: SIM-LIC-0001
+    issuer: Simulador
+  technical_contact:
+    name: Simulator Bank
+    email: simulator-bank@kulpay.dev
+  compliance_contact:
+    name: Simulator Bank
+    email: simulator-bank@kulpay.dev
+  expected_monthly_volume: 1000
+  expected_monthly_value: "10000000"
+  risk_tier: low
+
+  # Registered with the partner's own keys. test_url receives the
+  # certification's webhooks; live_url the pilot's.
+  webhooks:
+    test_url: http://simulator:8085/partner-webhooks
+    live_url: http://simulator:8085/partner-webhooks
+
+  kyb:
+    documents:
+      - {type: licence, file: simulator-bank/placeholder.pdf}
+      - {type: registration_certificate, file: simulator-bank/placeholder.pdf}
+      - {type: articles, file: simulator-bank/placeholder.pdf}
+      - {type: ubo_declaration, file: simulator-bank/placeholder.pdf}
+      - {type: director_ids, file: simulator-bank/placeholder.pdf}
+      - {type: aml_policy, file: simulator-bank/placeholder.pdf}
+      - {type: financial_statements, file: simulator-bank/placeholder.pdf}
+    screenings:
+      sanctions: {subject: Banco Simulado KulPay, reference: simulator, notes: development only}
+      pep: {subject: Banco Simulado KulPay, reference: simulator, notes: development only}
+
+  commercial_terms:
+    contract_ref: SIM-CONTRACT-0001
+    signed_contract_file: simulator-bank/placeholder.pdf
+    funds_flow: direct
+    fee_schedule:
+      - {method: cash_deposit, percent: "0", fixed: "0", currency: MZN}
+      - {method: bank_transfer, percent: "0", fixed: "0", currency: MZN}
+    settlement:
+      frequency_days: 1
+      currency: MZN
+      account: SIMBANK-TRUST-001
+    limits:
+      per_transaction: "500000"
+      daily: "20000000"
+      monthly: "400000000"
+      currency: MZN
+
+  capability_matrix:
+    types:
+      - type: NAME_LOOKUP
+        methods: [cash_deposit, bank_transfer]
+        direction: inbound
+        mode: sync
+        currencies: [MZN]
+        countries: [MZ]
+        partial: false
+        three_ds: false
+        idempotency: true
+        confirmation: polling
+        timeout_ms: 10000
+      - type: CASH_IN
+        methods: [cash_deposit, bank_transfer]
+        direction: inbound
+        mode: sync
+        currencies: [MZN]
+        countries: [MZ]
+        partial: false
+        three_ds: false
+        idempotency: true
+        confirmation: polling
+        timeout_ms: 10000
+    capabilities:
+      - name: account_funding.incoming
+        modes: [test, live]
+        currencies: [MZN]
+        max_amount_minor: 100000000
+
+  # The simulator's statements (POST /api/partner/statements) in its CSV.
+  statement_profile:
+    sample_file: simulator-bank/sample-statement.csv
+    profile:
+      id: simbank-trust
+      standard: csv
+      direction: push
+      channel: api_upload
+      frequency: daily
+      cutoff: "23:00"
+      timezone: Africa/Maputo
+      arrival_window: 2h
+      granularity: transaction
+      security:
+        checksum: sha256
+      acknowledgement: api
+      currency: MZN
+      date_format: YYYY-MM-DD
+      accounts: [SIMBANK-TRUST-001]
+      mapping:
+        line_id: line_id
+        account: account
+        value_date: value_date
+        booking_date: booking_date
+        amount: amount
+        currency: currency
+        direction: direction
+        psp_reference: provider_reference
+        kulpay_reference: kulpay_reference
+        end_to_end_id: end_to_end_id
+        counterparty: counterparty
+        depositor_ref: depositor_reference
+        fee: fee
+
+  # The live routes KulPay serves through this bank: incoming transfers by
+  # reference. Cash deposits are off in live by default; once the launch
+  # matrix enables them, add
+  #   {operation: cash_deposit, driver: partner_api, method: cash, mode: live, scope: acc_top}
+  launch_routes:
+    - {operation: incoming_transfer, driver: partner_api, method: deposit_reference, mode: live, scope: acc_top}
+
+pilot:
+  routing_weight: 100
+  limit_percentage: 100
+  credential_valid_days: 365
+  reason: Simulator bank pilot (development)
+  rollback_reason: Suspend the simulator bank pilot
+
+test_business:
+  business_name: Simulator Bank Test Business
+  country: MZ
+  biller:
+    code: SIMBANK
+    name: Simulator Bank Test Biller
+    category: education
+    support_email: simulator-bank@kulpay.dev
+    presentment_modes: [push]
+    invoice_expiry_days: 30
+  product:
+    code: POSTPAID
+    name: Simulator postpaid invoice
+    shape: postpaid
+    currency: MZN
+    amount_rule: presented
+    reference_label: Customer account
+    reference_pattern: '^[A-Z0-9-]{3,40}$'
+    reference_example: SIM-PILOT-001
+    lookup_required: true
+    routable: true
+    model: agent
+    fee_bearer: biller
+    enabled: true
+  invoices:
+    rf:
+      number: SIM-RF-001
+      account_reference: SIM-PILOT-RF
+      amount: "100.00"
+      description: Simulator invoice paid with RF reference
+    qr:
+      number: SIM-QR-001
+      account_reference: SIM-PILOT-QR
+      amount: "125.00"
+      description: Simulator invoice paid from QR

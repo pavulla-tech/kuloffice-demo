@@ -6,7 +6,7 @@
 .PHONY: help setup sync-env clean-env-backups config check-images \
         images push bundle load theme license \
         start start-portal start-website stop restart logs ps update clean reset-blnk \
-        init operator gateway-signin solange-kulpay gateway-kuloffice cash-deposits gateway-billers \
+        init operator gateway-signin solange-kulpay gateway-kuloffice cash-deposits gateway-billers simulator-bank \
         deploy rollback releases status health backup restore
 
 ENV_FILE ?= .env
@@ -59,6 +59,7 @@ help:
 	@echo "  make platform-wallet    KulPay balance at the Gateway checkout for KulPay's own purchases"
 	@echo "  make cash-deposits      partner cash deposits credit KulPay accounts (live; dev only)"
 	@echo "  make gateway-billers    billers approved in the back office provisioned at the Gateway"
+	@echo "  make simulator-bank     the PSP simulator as a certified partner bank (SIMBANK=plan|apply|rollback)"
 	@echo "  make operator EMAIL=… FIRST=… LAST=… [ROLE=Revisores|ADMIN] [SOLANGE=viewer,developer] [GATEWAY=1]"
 	@echo "                          ROLE=ADMIN: the Administradores role (every kuloffice permission)"
 	@echo "                          a staff account; ROLE= (empty) for Solange only"
@@ -272,6 +273,23 @@ cash-deposits:
 gateway-billers:
 	@grep -q '^KULOFFICE_INCOMING_TRANSFERS_ENABLED=true' $(ENV_FILE) || { echo "turn incoming transfers on first (KULOFFICE_INCOMING_TRANSFERS_ENABLED=true): the billers' status comes on its webhook" >&2; exit 1; }
 	@GATEWAY_BILLER_PROVISIONING=1 ENV_FILE=$(ENV_FILE) COMPOSE="docker compose --env-file $(ENV_FILE)" sh scripts/gateway-kuloffice.sh
+
+# The PSP simulator as a partner bank, brought in by the same provisioner as
+# a real bank's pilot (../bank-deploy/provisioning/psp_provision.py with
+# simulator-bank.example.yaml): application, KYB, terms, capabilities, its
+# webhook endpoint, certification (the simulator answers, statement included)
+# and the pilot; the simulator receives its keys and webhook secrets. Safe to
+# repeat: it resumes. SIMBANK=plan checks without changing anything;
+# SIMBANK=rollback suspends it. State, secrets and the readiness report:
+# simulator-bank-output/ (root-only).
+SIMBANK ?= apply
+simulator-bank:
+	@mkdir -p simulator-bank-output && chmod 700 simulator-bank-output
+	$(COMPOSE) --profile tools run --rm --no-deps -u 0 \
+		-v "$(CURDIR)/../bank-deploy/provisioning:/psp:ro" -v "$(CURDIR)/simulator-bank-output:/output" \
+		-e PSP_CONFIG=/psp/simulator-bank.example.yaml -e PSP_OUTPUT=/output \
+		-e GATEWAY_PUBLIC_INTERNAL_URL=http://gateway:9090 \
+		--entrypoint sh tools -c 'python3 -c "import yaml" 2>/dev/null || python3 -m pip install --quiet --disable-pip-version-check --target /tmp/py pyyaml; PYTHONPATH=/tmp/py exec python3 /psp/psp_provision.py $(SIMBANK)'
 
 # ROLE=ADMIN: an admin, holding every permission in kuloffice's catalogue.
 ROLE ?= Revisores

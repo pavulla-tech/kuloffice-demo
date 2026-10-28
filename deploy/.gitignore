@@ -7,3 +7,4 @@ geoip/*
 state/
 .ci.env
 bundles/
+simulator-bank-output/

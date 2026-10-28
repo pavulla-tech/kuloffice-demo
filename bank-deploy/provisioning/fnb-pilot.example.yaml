@@ -65,6 +65,13 @@ partner:
   expected_monthly_value: "10000000"
   risk_tier: medium
 
+  # FNB's webhook endpoints, registered with FNB's own keys: test_url gets
+  # the certification's signed webhooks (it must reject a bad signature with
+  # a 4xx), live_url the pilot's. Their signing secrets land in secrets.json.
+  webhooks:
+    test_url: ""              # REQUIRED for certification
+    live_url: ""
+
   kyb:
     # Supply every document type required by the active Gateway catalogue.
     # `type` examples are intentionally not guessed; use GET
@@ -130,6 +137,12 @@ partner:
         modes: [test, live]
         currencies: [MZN]
         max_amount_minor: 100000000
+
+  # Certification's second round: the first names the sandbox payments FNB's
+  # statement must list (statement-request.json in the output directory);
+  # put FNB's statement (CSV: reference, amount, currency, date) here and run
+  # apply again.
+  certification_statement_file: ""
 
   statement_profile:
     sample_file: ""           # REQUIRED; real FNB sample statement

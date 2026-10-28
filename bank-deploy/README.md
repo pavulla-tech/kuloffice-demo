@@ -46,6 +46,22 @@ stops at `pilot`. It never bypasses a gate. If certification depends on FNB
 work that is not ready yet, the command exits with status 3 and a
 `waiting_for_certification` report. Re-run it after the integration is fixed.
 
+Certification runs in rounds. It registers FNB's test webhook endpoint
+(`partner.webhooks.test_url`) with FNB's sandbox key, so the webhook cases can
+sign and send real webhooks; the signing secret goes to `secrets.json`. The
+first round uses the sample statement; its statement case then names the
+sandbox payments FNB's statement must list, written to
+`fnb-pilot-output/statement-request.json`. Put FNB's statement (CSV:
+`reference,amount,currency,date`) in `partner.certification_statement_file`
+and run `apply` again: it repeats the failed cases with that statement and
+keeps the passed ones. FNB's live webhook endpoint (`partner.webhooks.live_url`)
+is registered on entering the pilot.
+
+The KulPay dev kit runs the same provisioner with the PSP simulator as the
+bank (`simulator-bank.example.yaml`, `make simulator-bank` in `deploy/`): the
+simulator receives its keys and webhook secrets and answers the statement
+round itself.
+
 One-time keys and temporary passwords are written only to
 `fnb-pilot-output/secrets.json` with mode `0600`. The non-secret operational
 summary is `fnb-pilot-output/readiness-report.json`. Keep both outside source

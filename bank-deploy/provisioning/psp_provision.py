@@ -93,7 +93,8 @@ def load_config(path: Path) -> dict[str, Any]:
         raise ProvisionError("schema_version must be 1")
     # Relative evidence paths resolve beside the YAML. The wrapper mounts that
     # whole directory read-only, so the same input folder is portable.
-    for name in ("partner.commercial_terms.signed_contract_file", "partner.statement_profile.sample_file"):
+    for name in ("partner.commercial_terms.signed_contract_file", "partner.statement_profile.sample_file",
+                 "partner.certification_statement_file"):
         raw = nested(value, name)
         if raw:
             target = Path(str(raw)).expanduser()
@@ -226,6 +227,37 @@ def live_cash_deposit_enabled(matrix: dict[str, Any]) -> bool:
 def percentage_amount(value: str, percentage: int) -> str:
     """Return a two-decimal pilot limit without binary floating-point drift."""
     return str((Decimal(str(value)) * Decimal(percentage) / Decimal(100)).quantize(Decimal("0.01")))
+
+
+def statement_payments(cases: list[dict[str, Any]]) -> list[dict[str, str]]:
+    """The payments a failed statement case says the bank's statement must list.
+
+    The Gateway names them as "listing: REF AMOUNT CURRENCY; ..." when no
+    statement was uploaded, and as "missing: REF AMOUNT, ..." when the
+    uploaded one did not list them.
+    """
+    case = next((c for c in cases if c.get("kind") == "statement" and c.get("status") == "failed"), None)
+    if case is None:
+        return []
+    actual = str(case.get("actual", ""))
+    payments: list[dict[str, str]] = []
+    if "listing: " in actual:
+        for item in actual.split("listing: ", 1)[1].split(";"):
+            parts = item.split()
+            if len(parts) >= 2:
+                payments.append({"reference": parts[0], "amount": parts[1],
+                                 "currency": parts[2] if len(parts) > 2 else "MZN"})
+    elif "missing: " in actual:
+        for item in actual.split("missing: ", 1)[1].split(","):
+            parts = item.split()
+            if len(parts) >= 2:
+                payments.append({"reference": parts[0], "amount": parts[1], "currency": "MZN"})
+    return payments
+
+
+def failed_cases_other_than_statement(cases: list[dict[str, Any]]) -> list[str]:
+    return [str(c.get("key")) for c in cases
+            if c.get("status") == "failed" and c.get("mandatory") and c.get("kind") != "statement"]
 
 
 class HTTP:
@@ -710,7 +742,7 @@ class Provisioner:
         if self.dry_run:
             return
         psp_id = self.state["psp_id"]
-        partner = HTTP(os.environ.get("GATEWAY_PUBLIC_INTERNAL_URL", "http://gateway:9090").rstrip("/") + "/v1", psp_key)
+        partner = self.partner_api(psp_key)
         try:
             _, current, _ = partner.call("GET", f"/psps/{psp_id}/statement-profiles")
             if current.get("profiles"):
@@ -731,7 +763,112 @@ class Provisioner:
         self.state["statement_profile_id"] = profile["id"]
         self.save()
 
+    def partner_api(self, key: str) -> "HTTP":
+        return HTTP(os.environ.get("GATEWAY_PUBLIC_INTERNAL_URL", "http://gateway:9090").rstrip("/") + "/v1", key)
+
+    def ensure_webhook_endpoint(self, mode: str, key: str) -> None:
+        """Registers the partner's webhook endpoint for a mode, once.
+
+        The certification's webhook cases sign and send real webhooks to the
+        test endpoint; the live one receives the pilot's. The signing secret
+        is shown once: it is kept in secrets.json and, for the simulator bank,
+        handed to the simulator.
+        """
+        url = str(nested(self.config, f"partner.webhooks.{mode}_url", "") or "").strip()
+        if not url:
+            return
+        self.step(f"register {self.name} {mode} webhook endpoint")
+        if self.dry_run:
+            return
+        api = self.partner_api(key)
+        _, listed, _ = api.call("GET", "/webhook-endpoints")
+        rows = listed.get("data", []) if isinstance(listed, dict) else []
+        if any(row.get("url") == url and not row.get("disabled_at") for row in rows):
+            if not self.secret_values.get(f"{mode}_webhook_secret"):
+                log(f"WARN  the {mode} webhook endpoint exists but its secret is not in secrets.json; rotate it in the portal")
+            return
+        body: dict[str, Any] = {"url": url, "mode": mode}
+        events = nested(self.config, "partner.webhooks.event_types")
+        if events:
+            body["event_types"] = list(events)
+        _, created, _ = api.call("POST", "/webhook-endpoints", body)
+        self.secret_values[f"{mode}_webhook_secret"] = created["secret"]
+        self.state[f"{mode}_webhook_endpoint_id"] = created.get("id")
+        self.save()
+
+    def simulator(self) -> "HTTP | None":
+        """The PSP simulator when it plays the partner bank (dev only)."""
+        url = str(nested(self.config, "simulator.url", "") or "").strip()
+        return HTTP(url) if url else None
+
+    def hand_to_simulator(self, mode: str, key: str) -> None:
+        simulator = self.simulator()
+        if simulator is None:
+            return
+        self.step(f"hand the simulator its {mode} partner key and webhook secret")
+        if self.dry_run:
+            return
+        body = {"gateway_key": key, "mode": mode,
+                "statement_profile_id": self.state.get("statement_profile_id", "")}
+        if self.secret_values.get(f"{mode}_webhook_secret"):
+            body["webhook_secret"] = self.secret_values[f"{mode}_webhook_secret"]
+        simulator.call("PUT", "/api/partner/setup", body)
+
+    def certification_statement(self, payments: list[dict[str, str]]) -> Path | None:
+        """The bank's statement for a failed statement case.
+
+        The simulator bank produces it at once. A real bank is asked for it:
+        the list goes to statement-request.json, and its statement is named in
+        partner.certification_statement_file for the next apply.
+        """
+        path = self.output / "certification-statement.csv"
+        simulator = self.simulator()
+        if simulator is not None:
+            _, csv_text, _ = simulator.call("POST", "/api/partner/certification-statement", {"payments": payments})
+            path.write_text(csv_text if isinstance(csv_text, str) else str(csv_text))
+            return path
+        given = str(nested(self.config, "partner.certification_statement_file", "") or "").strip()
+        if given and Path(given).expanduser().is_file():
+            return Path(given).expanduser()
+        atomic_json(self.output / "statement-request.json", {
+            "columns": ["reference", "amount", "currency", "date"], "payments": payments,
+            "note": f"{self.name} lists these sandbox payments in a CSV statement; "
+                    "name it in partner.certification_statement_file and run apply again",
+        }, mode=0o644)
+        return None
+
+    def start_run(self, rerun_of: str = "", statement: Path | None = None) -> dict[str, Any]:
+        psp_id = self.state["psp_id"]
+        fields = {"rerun_of": rerun_of} if rerun_of else {}
+        if statement is None and not rerun_of:
+            statement = Path(str(nested(self.config, "partner.statement_profile.sample_file"))).expanduser()
+        if statement is None:
+            _, run, _ = self.admin.call("POST", f"/admin/psps/{psp_id}/certification/runs", {"rerun_of": rerun_of})
+            return run
+        return self.admin.multipart(f"/admin/psps/{psp_id}/certification/runs", fields, {"statement": statement})
+
+    def wait_run(self, run_id: str) -> dict[str, Any]:
+        psp_id = self.state["psp_id"]
+        deadline = time.monotonic() + 35 * 60
+        while time.monotonic() < deadline:
+            _, view, _ = self.admin.call("GET", f"/admin/psps/{psp_id}/certification/runs/{run_id}")
+            if view["run"].get("status") != "running":
+                self.state["certification_run"] = view["run"]
+                self.save()
+                return view
+            time.sleep(5)
+        raise ProvisionError("certification did not finish within 35 minutes")
+
     def ensure_certification(self) -> bool:
+        """Runs certification in rounds until it passes or waits on someone.
+
+        Round 1 runs every case with the sample statement. A failed statement
+        case names the run's sandbox payments; with the bank's statement
+        listing them, round 2 repeats the failed cases and carries the passed
+        ones (and their payments). Any other failed mandatory case waits for
+        the partner's integration to be corrected; the next apply repeats the
+        failed cases.
+        """
         self.step("run Gateway certification and stop if any mandatory case fails")
         if self.dry_run:
             return False
@@ -743,28 +880,45 @@ class Provisioner:
             self.transition("technical_setup", f"Open {self.name} sandbox technical setup")
         sandbox_key = self.reveal_onboarding_key("sandbox")
         self.ensure_statement_profile(sandbox_key)
+        self.ensure_webhook_endpoint("test", sandbox_key)
+        self.hand_to_simulator("test", sandbox_key)
         psp = self.psp()
         if psp.get("status") == "technical_setup":
             self.transition("certification", f"Begin {self.name} cash-deposit certification")
         _, runs, _ = self.admin.call("GET", f"/admin/psps/{psp_id}/certification/runs")
-        run = next((item for item in runs.get("data", []) if item.get("status") == "running"), None)
-        if run is None:
-            sample = Path(str(nested(self.config, "partner.statement_profile.sample_file"))).expanduser()
-            run = self.admin.multipart(f"/admin/psps/{psp_id}/certification/runs", {}, {"statement": sample})
-        run_id = run["id"]
-        deadline = time.monotonic() + 35 * 60
-        while time.monotonic() < deadline:
-            _, view, _ = self.admin.call("GET", f"/admin/psps/{psp_id}/certification/runs/{run_id}")
-            current = view["run"]
-            if current.get("status") != "running":
-                self.state["certification_run"] = current
-                self.save()
-                if current.get("status") != "passed":
-                    log(f"WAIT  certification did not pass; inspect readiness-report.json and rerun after {self.name} integration is corrected")
-                    return False
+        latest = next(iter(runs.get("data", [])), None)
+        # A run that failed before this apply is repeated once: the partner
+        # may have corrected its integration since.
+        resumed = False
+        if latest is not None and latest.get("status") == "running":
+            view = self.wait_run(latest["id"])
+        elif latest is not None and latest.get("status") == "failed":
+            _, view, _ = self.admin.call("GET", f"/admin/psps/{psp_id}/certification/runs/{latest['id']}")
+            resumed = True
+        else:
+            view = self.wait_run(self.start_run()["id"])
+        for _ in range(3):
+            if view["run"].get("status") == "passed":
                 return bool(self.psp().get("certified_at"))
-            time.sleep(5)
-        raise ProvisionError("certification did not finish within 35 minutes")
+            payments = statement_payments(view.get("cases", []))
+            statement = None
+            if payments:
+                statement = self.certification_statement(payments)
+                if statement is None:
+                    log(f"WAIT  {self.name}'s statement must list {len(payments)} sandbox payment(s): "
+                        f"see {self.output / 'statement-request.json'}")
+                    return False
+            elif not resumed:
+                break
+            resumed = False
+            log("==    repeat the failed cases" + (" with the bank's statement" if statement else ""))
+            view = self.wait_run(self.start_run(rerun_of=view["run"]["id"], statement=statement)["id"])
+        if view["run"].get("status") == "passed":
+            return bool(self.psp().get("certified_at"))
+        failed = failed_cases_other_than_statement(view.get("cases", [])) or ["statement/sample"]
+        log(f"WAIT  certification did not pass ({', '.join(failed)}); inspect readiness-report.json "
+            f"and run apply again after {self.name}'s integration is corrected")
+        return False
 
     def ensure_pilot(self) -> None:
         self.step("enter controlled pilot, set limits and restrict merchants")
@@ -788,7 +942,7 @@ class Provisioner:
         # Replace it immediately with the least-privilege restricted key the partner
         # needs for the agreed flows, then revoke the broad one.
         broad_key = self.reveal_onboarding_key("live")
-        broad_api = HTTP(os.environ.get("GATEWAY_PUBLIC_INTERNAL_URL", "http://gateway:9090").rstrip("/") + "/v1", broad_key)
+        broad_api = self.partner_api(broad_key)
         if not self.secret_values.get("partner_live_api_key"):
             expires = dt.datetime.now(dt.timezone.utc) + dt.timedelta(
                 days=int(nested(self.config, "pilot.credential_valid_days", 90)))
@@ -803,12 +957,16 @@ class Provisioner:
             self.state["partner_live_api_key_expires_at"] = issued.get("expires_at")
             self.state["partner_live_key_restricted"] = True
             self.save()
+        # The live webhook endpoint is registered while the broad key exists:
+        # the restricted key has no webhook scope.
+        self.ensure_webhook_endpoint("live", broad_key)
         broad_id = psp.get("live_key_id", "")
         if broad_id and not self.state.get("broad_pilot_key_revoked"):
             broad_api.call("DELETE", f"/api-keys/{broad_id}", expected=(200, 204))
             self.state["broad_pilot_key_revoked"] = True
             self.secret_values.pop("live_api_key", None)
         self.save()
+        self.hand_to_simulator("live", self.secret_values["partner_live_api_key"])
 
     def rollback(self) -> int:
         """Disable pilot traffic and suspend the partner through maker/checker.
@@ -892,6 +1050,8 @@ class Provisioner:
             "partner_live_api_key_scopes": ["transactions:read", "transactions:write", "bills:read",
                                          "bills:artifacts", "events:read", "reconciliation:read",
                                          "reconciliation:write"],
+            "test_webhook_endpoint_id": self.state.get("test_webhook_endpoint_id"),
+            "live_webhook_endpoint_id": self.state.get("live_webhook_endpoint_id"),
             "pilot_routing_disabled": self.state.get("pilot_routing_disabled", False),
             "suspended_at": self.state.get("suspended_at"),
             "credentials_file": str(self.secrets_path),
@@ -924,6 +1084,9 @@ class Provisioner:
             raise ProvisionError("the active launch matrix does not enable " + ", ".join(route_text(r) for r in missing))
         self.admin.call("GET", "/admin/accounts")
         self.checker.call("GET", "/admin/approvals?pending=1")
+        simulator = self.simulator()
+        if simulator is not None:
+            simulator.call("GET", "/healthz")
         if nested(self.config, "operators.create_workforce_users", True):
             status, _ = self.keycloak_call("POST", "/realms/master/protocol/openid-connect/token", form={
                 "grant_type": "password", "client_id": "admin-cli",

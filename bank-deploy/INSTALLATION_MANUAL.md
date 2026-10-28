@@ -220,6 +220,9 @@ The root credential is retained only by MinIO and its one-shot initializer.
    The command is resumable and stops at `pilot`. A status of 3 with
    `waiting_for_certification` means the FNB integration must complete or fix
    the mandatory certification cases; run the same command again afterwards.
+   When the only failure is the statement, `fnb-pilot-output/statement-request.json`
+   lists the sandbox payments FNB's statement must show; name FNB's CSV
+   statement in `partner.certification_statement_file` and run `apply` again.
    Store `fnb-pilot-output/secrets.json` in the bank's secrets vault. To stop
    the pilot without deleting evidence or audit history, run
    `ENV_FILE=.env sh scripts/provision-psp.sh rollback`; this removes
