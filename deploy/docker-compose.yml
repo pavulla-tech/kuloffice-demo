@@ -682,6 +682,13 @@ services:
       KULOFFICE_GATEWAY_BILLS_OFFERING_ID: ${KULOFFICE_GATEWAY_BILLS_OFFERING_ID:-}
       # One operator may propose and decide (dev only; the Gateway follows).
       KULOFFICE_APPROVALS_SINGLE_OPERATOR: ${KULOFFICE_APPROVALS_SINGLE_OPERATOR:-true}
+      # The terminal's float top-up with the agent's own KulPay: KulOffice
+      # checks that account's PIN by signing its phone in with the PIN on a
+      # client allowed direct grants through phone-auth (its lockout guards
+      # it). On dev that is the USSD client the realm setup creates; a
+      # production kit gets its own client.
+      KULOFFICE_KEYCLOAK_PIN_CLIENT_ID: ${USSD_CLIENT_ID:-ussd-gateway}
+      KULOFFICE_KEYCLOAK_PIN_CLIENT_SECRET: ${USSD_CLIENT_SECRET:-}
       # External bills and supply (and paying a business's Gateway bill from a
       # wallet) are on; the clearing balance is made by KulOffice's BLNK
       # bootstrap unless KULOFFICE_SUPPLY_CLEARING_BALANCE names one.
