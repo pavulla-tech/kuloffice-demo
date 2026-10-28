@@ -852,7 +852,12 @@ class Provisioner:
         self.save()
 
     def partner_api(self, key: str) -> "HTTP":
-        return HTTP(os.environ.get("GATEWAY_PUBLIC_INTERNAL_URL", "http://gateway:9090").rstrip("/") + "/v1", key)
+        # The partner API (/v1/psps/…, webhook endpoints, API keys) is served
+        # on the Gateway's management listener; the public one serves the
+        # onboarding pages and answers 404 there.
+        base = os.environ.get("GATEWAY_PARTNER_URL") or os.environ.get("GATEWAY_MANAGEMENT_URL", "http://gateway:9091/v1")
+        base = base.rstrip("/")
+        return HTTP(base if base.endswith("/v1") else base + "/v1", key)
 
     def ensure_webhook_endpoint(self, mode: str, key: str) -> None:
         """Registers the partner's webhook endpoint for a mode, once.
