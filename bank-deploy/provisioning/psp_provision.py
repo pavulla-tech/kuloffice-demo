@@ -544,6 +544,9 @@ class Provisioner:
                 raise
             payload = dict(biller_cfg)
             payload["tenant_id"] = account["id"]
+            # The Gateway wants the biller's country; the YAML names it once,
+            # on the test business.
+            payload.setdefault("country", nested(self.config, "test_business.country", "MZ"))
             _, biller, _ = self.admin.call("POST", "/admin/billers", payload)
             products = []
         if biller.get("tenant_id") != account["id"]:
