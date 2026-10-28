@@ -30,8 +30,8 @@ The FNB workflow is declarative and resumable. Copy
 legal, KYB, contract and statement details, then run:
 
 ```bash
-ENV_FILE=.env sh scripts/provision-fnb-pilot.sh plan
-ENV_FILE=.env sh scripts/provision-fnb-pilot.sh apply
+ENV_FILE=.env sh scripts/provision-psp.sh plan
+ENV_FILE=.env sh scripts/provision-psp.sh apply
 ```
 
 These are the bank-server commands and require only the existing Docker Compose
@@ -52,7 +52,7 @@ summary is `fnb-pilot-output/readiness-report.json`. Keep both outside source
 control and move the credentials into the bank's secrets vault immediately.
 
 If the controlled pilot must be stopped, run
-`ENV_FILE=.env sh scripts/provision-fnb-pilot.sh rollback`. It first empties
+`ENV_FILE=.env sh scripts/provision-psp.sh rollback`. It first empties
 the pilot merchant allow-list, then uses the configured maker and checker
 Gateway principals to suspend the PSP. The PSP, keys, approvals and audit
 history remain in place; suspension makes the account and its keys unusable.

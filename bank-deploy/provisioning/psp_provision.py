@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Provision the FNB cash-deposit pilot without bypassing production gates.
+"""Provision a PSP partner (a bank's cash deposits and transfers) without bypassing production gates.
+
+One provisioner for every partner: the FNB pilot (fnb-pilot.example.yaml) and,
+on dev, the PSP simulator playing the partner bank (simulator-bank.example.yaml).
+Each partner's YAML says who it is, its evidence and what it needs enabled.
 
 The command is deliberately resumable. Non-secret progress is stored in
 state.json and one-time credentials in secrets.json (0600). Re-running apply
@@ -89,7 +93,7 @@ def load_config(path: Path) -> dict[str, Any]:
         raise ProvisionError("schema_version must be 1")
     # Relative evidence paths resolve beside the YAML. The wrapper mounts that
     # whole directory read-only, so the same input folder is portable.
-    for name in ("fnb.commercial_terms.signed_contract_file", "fnb.statement_profile.sample_file"):
+    for name in ("partner.commercial_terms.signed_contract_file", "partner.statement_profile.sample_file"):
         raw = nested(value, name)
         if raw:
             target = Path(str(raw)).expanduser()
@@ -100,7 +104,7 @@ def load_config(path: Path) -> dict[str, Any]:
             for part in parts[:-1]:
                 container = container[part]
             container[parts[-1]] = str(target)
-    for document in nested(value, "fnb.kyb.documents", []) or []:
+    for document in nested(value, "partner.kyb.documents", []) or []:
         if isinstance(document, dict) and document.get("file"):
             target = Path(str(document["file"])).expanduser()
             if not target.is_absolute():
@@ -109,15 +113,15 @@ def load_config(path: Path) -> dict[str, Any]:
     require(value, [
         "operators.maker.email", "operators.maker.first_name", "operators.maker.last_name",
         "operators.checker.email", "operators.checker.first_name", "operators.checker.last_name",
-        "operators.fnb_technical.email", "operators.fnb_technical.first_name", "operators.fnb_technical.last_name",
-        "fnb.legal_name", "fnb.registration_number", "fnb.licence.type", "fnb.licence.number",
-        "fnb.licence.issuer", "fnb.technical_contact.name", "fnb.technical_contact.email",
-        "fnb.compliance_contact.name", "fnb.compliance_contact.email", "fnb.kyb.screenings.sanctions.subject",
-        "fnb.kyb.screenings.sanctions.reference", "fnb.kyb.screenings.pep.subject",
-        "fnb.kyb.screenings.pep.reference", "fnb.commercial_terms.contract_ref",
-        "fnb.commercial_terms.signed_contract_file", "fnb.statement_profile.sample_file",
-        "fnb.statement_profile.profile.standard", "fnb.statement_profile.profile.accounts",
-        "fnb.commercial_terms.settlement.account",
+        "operators.partner_technical.email", "operators.partner_technical.first_name", "operators.partner_technical.last_name",
+        "partner.legal_name", "partner.registration_number", "partner.licence.type", "partner.licence.number",
+        "partner.licence.issuer", "partner.technical_contact.name", "partner.technical_contact.email",
+        "partner.compliance_contact.name", "partner.compliance_contact.email", "partner.kyb.screenings.sanctions.subject",
+        "partner.kyb.screenings.sanctions.reference", "partner.kyb.screenings.pep.subject",
+        "partner.kyb.screenings.pep.reference", "partner.commercial_terms.contract_ref",
+        "partner.commercial_terms.signed_contract_file", "partner.statement_profile.sample_file",
+        "partner.statement_profile.profile.standard", "partner.statement_profile.profile.accounts",
+        "partner.commercial_terms.settlement.account",
         "test_business.business_name", "test_business.biller.code", "test_business.biller.name",
         "test_business.product.code", "test_business.product.name",
         "test_business.invoices.rf.number", "test_business.invoices.rf.account_reference",
@@ -128,8 +132,8 @@ def load_config(path: Path) -> dict[str, Any]:
     checker = nested(value, "operators.checker.email").strip().lower()
     if maker == checker:
         raise ProvisionError("maker and checker must be different people")
-    for name in ("operators.maker.email", "operators.checker.email", "operators.fnb_technical.email",
-                 "fnb.technical_contact.email", "fnb.compliance_contact.email"):
+    for name in ("operators.maker.email", "operators.checker.email", "operators.partner_technical.email",
+                 "partner.technical_contact.email", "partner.compliance_contact.email"):
         email = str(nested(value, name, "")).strip()
         if not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", email):
             raise ProvisionError(f"{name} must be an email address")
@@ -141,44 +145,44 @@ def load_config(path: Path) -> dict[str, Any]:
             raise ProvisionError(f"{name} must be an integer") from error
         if number < low or number > high:
             raise ProvisionError(f"{name} must be between {low} and {high}")
-    for name in ("fnb.expected_monthly_volume",):
+    for name in ("partner.expected_monthly_volume",):
         try:
             if int(nested(value, name)) <= 0:
                 raise ValueError
         except (TypeError, ValueError) as error:
             raise ProvisionError(f"{name} must be a positive integer") from error
-    for name in ("fnb.expected_monthly_value", "fnb.commercial_terms.limits.per_transaction",
-                 "fnb.commercial_terms.limits.daily", "fnb.commercial_terms.limits.monthly",
+    for name in ("partner.expected_monthly_value", "partner.commercial_terms.limits.per_transaction",
+                 "partner.commercial_terms.limits.daily", "partner.commercial_terms.limits.monthly",
                  "test_business.invoices.rf.amount", "test_business.invoices.qr.amount"):
         try:
             if Decimal(str(nested(value, name))) <= 0:
                 raise ValueError
         except (ValueError, ArithmeticError) as error:
             raise ProvisionError(f"{name} must be a positive amount") from error
-    standard = str(nested(value, "fnb.statement_profile.profile.standard", "")).strip().lower()
+    standard = str(nested(value, "partner.statement_profile.profile.standard", "")).strip().lower()
     if standard != "csv":
-        raise ProvisionError("fnb.statement_profile.profile.standard must be csv for automated certification")
-    matrix = nested(value, "fnb.capability_matrix", {})
+        raise ProvisionError("partner.statement_profile.profile.standard must be csv for automated certification")
+    matrix = nested(value, "partner.capability_matrix", {})
     types = matrix.get("types", []) if isinstance(matrix, dict) else []
     rows = {(str(row.get("type", "")).upper(), method)
             for row in types if isinstance(row, dict) for method in row.get("methods", [])}
     for needed in (("NAME_LOOKUP", "cash_deposit"), ("CASH_IN", "cash_deposit")):
         if needed not in rows:
-            raise ProvisionError(f"fnb.capability_matrix must enable {needed[0]}/{needed[1]}")
+            raise ProvisionError(f"partner.capability_matrix must enable {needed[0]}/{needed[1]}")
     capabilities = matrix.get("capabilities", []) if isinstance(matrix, dict) else []
     incoming = next((row for row in capabilities if row.get("name") == "account_funding.incoming"), None)
     if not incoming or not {"test", "live"}.issubset(set(incoming.get("modes", []))) or \
             "MZN" not in incoming.get("currencies", []):
-        raise ProvisionError("fnb.capability_matrix must enable account_funding.incoming in test and live for MZN")
-    if not nested(value, "fnb.kyb.documents"):
-        raise ProvisionError("fnb.kyb.documents must list every required KYB document")
-    for name in ("fnb.commercial_terms.signed_contract_file", "fnb.statement_profile.sample_file"):
+        raise ProvisionError("partner.capability_matrix must enable account_funding.incoming in test and live for MZN")
+    if not nested(value, "partner.kyb.documents"):
+        raise ProvisionError("partner.kyb.documents must list every required KYB document")
+    for name in ("partner.commercial_terms.signed_contract_file", "partner.statement_profile.sample_file"):
         file_path = Path(str(nested(value, name))).expanduser()
         if not file_path.is_file():
             raise ProvisionError(f"{name} does not exist: {file_path}")
-    for index, document in enumerate(nested(value, "fnb.kyb.documents", [])):
+    for index, document in enumerate(nested(value, "partner.kyb.documents", [])):
         if not isinstance(document, dict) or not document.get("type") or not document.get("file"):
-            raise ProvisionError(f"fnb.kyb.documents[{index}] needs type and file")
+            raise ProvisionError(f"partner.kyb.documents[{index}] needs type and file")
         if not Path(str(document["file"])).expanduser().is_file():
             raise ProvisionError(f"KYB file does not exist: {document['file']}")
     return value
@@ -192,11 +196,31 @@ def extract_one_time_key(which: str, page: str) -> str:
     return match.group(0)
 
 
-def live_cash_deposit_enabled(matrix: dict[str, Any]) -> bool:
+# The launch-matrix routes a partner needs live, unless its YAML lists its own
+# (partner.launch_routes): the FNB pilot's cash deposits.
+DEFAULT_LAUNCH_ROUTES = [{"operation": "cash_deposit", "driver": "partner_api", "method": "cash", "mode": "live", "scope": "acc_top"}]
+
+
+def launch_routes(config: dict[str, Any]) -> list[dict[str, str]]:
+    return nested(config, "partner.launch_routes", None) or DEFAULT_LAUNCH_ROUTES
+
+
+def missing_routes(matrix: dict[str, Any], wanted: list[dict[str, str]]) -> list[dict[str, str]]:
+    """The wanted routes the Gateway's matrix in force does not enable (its
+    /admin/launch-matrix answer lists one route per operation, driver,
+    method, mode and scope)."""
     routes = matrix.get("routes", matrix.get("matrix", {}).get("routes", []))
-    return any(route.get("operation") == "cash_deposit" and route.get("driver") == "partner_api"
-               and route.get("method") == "cash" and route.get("mode") == "live"
-               and route.get("scope") == "acc_top" and route.get("enabled") is True for route in routes)
+    def enabled(want: dict[str, str]) -> bool:
+        return any(route.get("enabled") is True and all(route.get(k) == v for k, v in want.items()) for route in routes)
+    return [want for want in wanted if not enabled(want)]
+
+
+def route_text(route: dict[str, str]) -> str:
+    return "/".join(str(route.get(k, "")) for k in ("operation", "driver", "method", "mode", "scope"))
+
+
+def live_cash_deposit_enabled(matrix: dict[str, Any]) -> bool:
+    return not missing_routes(matrix, DEFAULT_LAUNCH_ROUTES)
 
 
 def percentage_amount(value: str, percentage: int) -> str:
@@ -233,8 +257,6 @@ class HTTP:
             raise ProvisionError(f"{method} {path} failed: HTTP {error.code}: {detail}") from error
         except urllib.error.URLError as error:
             raise ProvisionError(f"{method} {path} failed: {error.reason}") from error
-        except urllib.error.URLError as error:
-            raise ProvisionError(f"{method} {path} failed: {error.reason}") from error
 
     def multipart(self, path: str, fields: dict[str, str], files: dict[str, Path],
                   expected: tuple[int, ...] = (200, 201, 202), method: str = "POST") -> Any:
@@ -268,6 +290,8 @@ class HTTP:
 class Provisioner:
     def __init__(self, config: dict[str, Any], output: Path, dry_run: bool = False) -> None:
         self.config = config
+        # The partner's short name in reasons, keys and messages ("FNB").
+        self.name = str(nested(config, "partner.short_name", "") or nested(config, "partner.legal_name", "")).strip()
         self.output = output
         self.dry_run = dry_run
         self.state_path = output / "state.json"
@@ -346,7 +370,7 @@ class Provisioner:
             raise ProvisionError(f"Gateway workforce client {client_id} was not found after provisioning")
         gateway_client_uuid = clients[0]["id"]
         passwords = self.secret_values.setdefault("workforce_temporary_passwords", {})
-        for role in ("maker", "checker", "fnb_technical"):
+        for role in ("maker", "checker", "partner_technical"):
             person = nested(self.config, f"operators.{role}")
             email = person["email"].strip().lower()
             query = urllib.parse.urlencode({"email": email, "exact": "true"})
@@ -466,15 +490,15 @@ class Provisioner:
             approval_id = self.pending_approval(biller["id"], "bill.biller_status")
             if not approval_id:
                 _, prepared, _ = self.admin.call("POST", f"/admin/billers/{code}/status", {
-                    "status": "active", "reason": "Enable controlled FNB pilot biller",
+                    "status": "active", "reason": f"Enable controlled {self.name} pilot biller",
                 })
                 approval_id = prepared["approval"]["id"]
-            self.approve(approval_id, "Approve controlled FNB pilot biller")
+            self.approve(approval_id, f"Approve controlled {self.name} pilot biller")
 
         biller_key = self.secret_values.get("test_biller_api_key", "")
         if not biller_key:
             _, issued, _ = self.admin.call("POST", f"/admin/accounts/{account['id']}/keys", {
-                "name": "FNB pilot invoice presenter", "type": "sk",
+                "name": f"{self.name} pilot invoice presenter", "type": "sk",
                 "scopes": ["invoices:read", "invoices:write"],
             })
             biller_key = issued["key"]["secret"]
@@ -501,35 +525,35 @@ class Provisioner:
         self.save()
 
     def application_data(self) -> dict[str, Any]:
-        fnb = self.config["fnb"]
-        licence = {key: value for key, value in fnb["licence"].items() if value}
+        partner = self.config["partner"]
+        licence = {key: value for key, value in partner["licence"].items() if value}
         return {
-            "kind": "psp", "partner_type": fnb.get("partner_type", "bank"),
-            "legal_name": fnb["legal_name"], "registration_number": fnb["registration_number"],
+            "kind": "psp", "partner_type": partner.get("partner_type", "bank"),
+            "legal_name": partner["legal_name"], "registration_number": partner["registration_number"],
             "country": nested(self.config, "deployment.country", "MZ"), "licences": [licence],
             "roles": ["cash_deposit_bank"], "countries": [nested(self.config, "deployment.country", "MZ")],
             "currencies": [nested(self.config, "deployment.currency", "MZN")],
             "transaction_types": ["cash_deposit", "bill_payment"],
-            "expected_monthly_volume": fnb["expected_monthly_volume"],
-            "expected_monthly_value": {"amount": str(fnb["expected_monthly_value"]),
+            "expected_monthly_volume": partner["expected_monthly_volume"],
+            "expected_monthly_value": {"amount": str(partner["expected_monthly_value"]),
                                        "currency": nested(self.config, "deployment.currency", "MZN")},
-            "technical_contact": fnb["technical_contact"], "compliance_contact": fnb["compliance_contact"],
+            "technical_contact": partner["technical_contact"], "compliance_contact": partner["compliance_contact"],
             "language": nested(self.config, "deployment.language", "pt"),
         }
 
     def ensure_application(self) -> None:
-        self.step("create or resume FNB PSP application")
+        self.step(f"create or resume {self.name} PSP application")
         if self.dry_run:
             return
         if self.state.get("psp_id"):
             return
         _, listed, _ = self.admin.call("GET", "/admin/psps")
-        existing = next((item for item in listed.get("data", []) if item.get("legal_name") == self.config["fnb"]["legal_name"]), None)
+        existing = next((item for item in listed.get("data", []) if item.get("legal_name") == self.config["partner"]["legal_name"]), None)
         if existing:
             if not self.secret_values.get("application_draft_token"):
                 raise ProvisionError(
-                    "an FNB PSP already exists but its one-time application token is not in the output directory; "
-                    "restore the original fnb-pilot-output directory before resuming")
+                    f"an {self.name} PSP already exists but its one-time application token is not in the output directory; "
+                    "restore the original provisioning output directory before resuming")
             self.state["psp_id"] = existing["id"]
             self.state["application_id"] = existing.get("application_id", "")
             self.save()
@@ -561,10 +585,10 @@ class Provisioner:
         if psp.get("kyb_status") == "approved":
             return
         if psp.get("status") == "applied":
-            self.transition("kyb_review", "Start FNB KYB review")
+            self.transition("kyb_review", f"Start {self.name} KYB review")
         _, kyb, _ = self.admin.call("GET", f"/admin/psps/{psp['id']}/kyb")
         existing_docs = {(item.get("type"), item.get("filename")): item for item in kyb.get("documents", [])}
-        for document in nested(self.config, "fnb.kyb.documents"):
+        for document in nested(self.config, "partner.kyb.documents"):
             path = Path(str(document["file"])).expanduser()
             current = existing_docs.get((document["type"], path.name))
             if current is None:
@@ -572,26 +596,26 @@ class Provisioner:
                                                {"type": document["type"]}, {"file": path})
             if current.get("status") != "accepted":
                 self.admin.call("POST", f"/admin/psps/{psp['id']}/kyb/documents/{current['id']}/review",
-                                {"decision": "accepted", "comment": "Verified for FNB pilot"})
+                                {"decision": "accepted", "comment": f"Verified for {self.name} pilot"})
         existing_kinds = {item.get("kind") for item in kyb.get("screenings", []) if item.get("result") == "clear"}
         for kind in ("sanctions", "pep"):
             if kind in existing_kinds:
                 continue
-            item = nested(self.config, f"fnb.kyb.screenings.{kind}")
+            item = nested(self.config, f"partner.kyb.screenings.{kind}")
             self.admin.call("POST", f"/admin/psps/{psp['id']}/kyb/screenings", {
                 "kind": kind, "subject": item["subject"], "result": "clear",
                 "reference": item["reference"], "notes": item.get("notes", ""),
             })
         self.admin.call("POST", f"/admin/psps/{psp['id']}/kyb/risk-tier", {
-            "tier": nested(self.config, "fnb.risk_tier", "medium"), "reason": "FNB pilot risk assessment",
+            "tier": nested(self.config, "partner.risk_tier", "medium"), "reason": f"{self.name} pilot risk assessment",
         })
         approval_id = self.pending_approval(psp["id"], "psp.kyb.approve")
         if not approval_id:
             _, prepared, _ = self.admin.call("POST", f"/admin/psps/{psp['id']}/kyb/decision", {
-                "decision": "approve", "reason": "FNB KYB evidence reviewed",
+                "decision": "approve", "reason": f"{self.name} KYB evidence reviewed",
             })
             approval_id = prepared["approval"]["id"]
-        self.approve(approval_id, "Approve FNB KYB for controlled pilot")
+        self.approve(approval_id, f"Approve {self.name} KYB for controlled pilot")
         self.save()
 
     def ensure_commercial(self) -> None:
@@ -600,27 +624,27 @@ class Provisioner:
             return
         psp = self.psp()
         if psp.get("status") == "kyb_approved":
-            self.transition("commercial_setup", "Begin FNB commercial setup")
+            self.transition("commercial_setup", f"Begin {self.name} commercial setup")
             psp = self.psp()
         _, versions, _ = self.admin.call("GET", f"/admin/psps/{psp['id']}/configs?kind=commercial_terms")
         if not any(item.get("status") == "active" for item in versions.get("data", [])):
-            terms = dict(nested(self.config, "fnb.commercial_terms"))
+            terms = dict(nested(self.config, "partner.commercial_terms"))
             contract_file = Path(str(terms.pop("signed_contract_file"))).expanduser()
             approval_id = self.pending_approval(psp["id"], "config.activate", "commercial_terms")
             if not approval_id:
                 _, prepared, _ = self.admin.call("POST", f"/admin/psps/{psp['id']}/configs/commercial_terms", {
-                    "document": terms, "reason": "FNB pilot commercial terms",
+                    "document": terms, "reason": f"{self.name} pilot commercial terms",
                 })
                 approval_id = prepared["approval"]["id"]
-            self.approve(approval_id, "Approve FNB pilot commercial terms")
-            self.admin.multipart(f"/admin/psps/{psp['id']}/contract", {"reason": "Signed FNB pilot contract"}, {"file": contract_file})
+            self.approve(approval_id, f"Approve {self.name} pilot commercial terms")
+            self.admin.multipart(f"/admin/psps/{psp['id']}/contract", {"reason": f"Signed {self.name} pilot contract"}, {"file": contract_file})
         elif not psp.get("contract_signed"):
-            contract_file = Path(str(nested(self.config, "fnb.commercial_terms.signed_contract_file"))).expanduser()
-            self.admin.multipart(f"/admin/psps/{psp['id']}/contract", {"reason": "Signed FNB pilot contract"}, {"file": contract_file})
+            contract_file = Path(str(nested(self.config, "partner.commercial_terms.signed_contract_file"))).expanduser()
+            self.admin.multipart(f"/admin/psps/{psp['id']}/contract", {"reason": f"Signed {self.name} pilot contract"}, {"file": contract_file})
         self.save()
 
     def ensure_capabilities(self) -> None:
-        self.step("approve FNB capability matrix")
+        self.step(f"approve {self.name} capability matrix")
         if self.dry_run:
             return
         psp_id = self.state["psp_id"]
@@ -630,11 +654,11 @@ class Provisioner:
         approval_id = self.pending_approval(psp_id, "config.activate", "capability_matrix")
         if not approval_id:
             _, prepared, _ = self.admin.call("POST", f"/admin/psps/{psp_id}/configs/capability_matrix", {
-                "document": nested(self.config, "fnb.capability_matrix"),
-                "reason": "FNB cash-deposit capability for controlled pilot",
+                "document": nested(self.config, "partner.capability_matrix"),
+                "reason": f"{self.name} cash-deposit capability for controlled pilot",
             })
             approval_id = prepared["approval"]["id"]
-        self.approve(approval_id, "Approve FNB cash-deposit capability")
+        self.approve(approval_id, f"Approve {self.name} cash-deposit capability")
         self.save()
 
     def reveal_onboarding_key(self, which: str) -> str:
@@ -682,7 +706,7 @@ class Provisioner:
         return token_value
 
     def ensure_statement_profile(self, psp_key: str) -> None:
-        self.step("validate and install FNB statement profile")
+        self.step(f"validate and install {self.name} statement profile")
         if self.dry_run:
             return
         psp_id = self.state["psp_id"]
@@ -696,13 +720,13 @@ class Provisioner:
         except ProvisionError as error:
             if "HTTP 404" not in str(error):
                 raise
-        profile = dict(nested(self.config, "fnb.statement_profile.profile"))
-        sample_path = Path(str(nested(self.config, "fnb.statement_profile.sample_file"))).expanduser()
+        profile = dict(nested(self.config, "partner.statement_profile.profile"))
+        sample_path = Path(str(nested(self.config, "partner.statement_profile.sample_file"))).expanduser()
         preview = partner.multipart(f"/psps/{psp_id}/statement-profiles/preview",
                                     {"profile": json.dumps(profile)}, {"sample": sample_path})
         profile["sample_file_id"] = preview["sample_file_id"]
         partner.call("PUT", f"/psps/{psp_id}/statement-profiles", {
-            "profiles": [profile], "reason": "FNB cash-deposit reconciliation profile",
+            "profiles": [profile], "reason": f"{self.name} cash-deposit reconciliation profile",
         })
         self.state["statement_profile_id"] = profile["id"]
         self.save()
@@ -716,16 +740,16 @@ class Provisioner:
         if psp.get("certified_at"):
             return True
         if psp.get("status") == "commercial_setup":
-            self.transition("technical_setup", "Open FNB sandbox technical setup")
+            self.transition("technical_setup", f"Open {self.name} sandbox technical setup")
         sandbox_key = self.reveal_onboarding_key("sandbox")
         self.ensure_statement_profile(sandbox_key)
         psp = self.psp()
         if psp.get("status") == "technical_setup":
-            self.transition("certification", "Begin FNB cash-deposit certification")
+            self.transition("certification", f"Begin {self.name} cash-deposit certification")
         _, runs, _ = self.admin.call("GET", f"/admin/psps/{psp_id}/certification/runs")
         run = next((item for item in runs.get("data", []) if item.get("status") == "running"), None)
         if run is None:
-            sample = Path(str(nested(self.config, "fnb.statement_profile.sample_file"))).expanduser()
+            sample = Path(str(nested(self.config, "partner.statement_profile.sample_file"))).expanduser()
             run = self.admin.multipart(f"/admin/psps/{psp_id}/certification/runs", {}, {"statement": sample})
         run_id = run["id"]
         deadline = time.monotonic() + 35 * 60
@@ -736,7 +760,7 @@ class Provisioner:
                 self.state["certification_run"] = current
                 self.save()
                 if current.get("status") != "passed":
-                    log("WAIT  certification did not pass; inspect readiness-report.json and rerun after FNB integration is corrected")
+                    log(f"WAIT  certification did not pass; inspect readiness-report.json and rerun after {self.name} integration is corrected")
                     return False
                 return bool(self.psp().get("certified_at"))
             time.sleep(5)
@@ -750,7 +774,7 @@ class Provisioner:
         if psp.get("status") != "pilot":
             self.transition("pilot", nested(self.config, "pilot.reason"))
             psp = self.psp()
-        terms = nested(self.config, "fnb.commercial_terms.limits")
+        terms = nested(self.config, "partner.commercial_terms.limits")
         percentage = int(nested(self.config, "pilot.limit_percentage", 10))
         merchants = [self.state["test_business_account_id"]]
         self.admin.call("PUT", f"/admin/psps/{psp['id']}/pilot", {
@@ -761,23 +785,23 @@ class Provisioner:
             "reason": nested(self.config, "pilot.reason"),
         })
         # The Gateway necessarily issues a full secret key on entering pilot.
-        # Replace it immediately with the least-privilege restricted key FNB
+        # Replace it immediately with the least-privilege restricted key the partner
         # needs for the agreed flows, then revoke the broad one.
         broad_key = self.reveal_onboarding_key("live")
         broad_api = HTTP(os.environ.get("GATEWAY_PUBLIC_INTERNAL_URL", "http://gateway:9090").rstrip("/") + "/v1", broad_key)
-        if not self.secret_values.get("fnb_live_api_key"):
+        if not self.secret_values.get("partner_live_api_key"):
             expires = dt.datetime.now(dt.timezone.utc) + dt.timedelta(
                 days=int(nested(self.config, "pilot.credential_valid_days", 90)))
             _, issued, _ = broad_api.call("POST", "/api-keys", {
-                "name": "FNB controlled cash-deposit pilot", "type": "rk",
+                "name": f"{self.name} controlled cash-deposit pilot", "type": "rk",
                 "scopes": ["transactions:read", "transactions:write", "bills:read", "bills:artifacts",
                            "events:read", "reconciliation:read", "reconciliation:write"],
                 "expires_at": expires.isoformat().replace("+00:00", "Z"),
             })
-            self.secret_values["fnb_live_api_key"] = issued["secret"]
-            self.state["fnb_live_api_key_id"] = issued["id"]
-            self.state["fnb_live_api_key_expires_at"] = issued.get("expires_at")
-            self.state["fnb_live_key_restricted"] = True
+            self.secret_values["partner_live_api_key"] = issued["secret"]
+            self.state["partner_live_api_key_id"] = issued["id"]
+            self.state["partner_live_api_key_expires_at"] = issued.get("expires_at")
+            self.state["partner_live_key_restricted"] = True
             self.save()
         broad_id = psp.get("live_key_id", "")
         if broad_id and not self.state.get("broad_pilot_key_revoked"):
@@ -787,20 +811,20 @@ class Provisioner:
         self.save()
 
     def rollback(self) -> int:
-        """Disable pilot traffic and suspend FNB through maker/checker.
+        """Disable pilot traffic and suspend the partner through maker/checker.
 
         No PSP, API key, approval, or audit record is deleted. Removing the
         merchant allow-list first makes the pilot ineligible for new routing;
         suspension then blocks the account and all of its credentials.
         """
         self.require_runtime(include_keycloak=False)
-        self.step("disable FNB pilot routing and suspend the PSP")
+        self.step(f"disable {self.name} pilot routing and suspend the PSP")
         if not self.state.get("psp_id"):
             _, listed, _ = self.admin.call("GET", "/admin/psps")
             match = next((item for item in listed.get("data", [])
-                          if item.get("legal_name") == self.config["fnb"]["legal_name"]), None)
+                          if item.get("legal_name") == self.config["partner"]["legal_name"]), None)
             if match is None:
-                raise ProvisionError("FNB PSP was not found; nothing can be rolled back")
+                raise ProvisionError(f"{self.name} PSP was not found; nothing can be rolled back")
             self.state["psp_id"] = match["id"]
             self.save()
 
@@ -811,11 +835,11 @@ class Provisioner:
             self.report("pilot_suspended")
             return 0
         if psp.get("status") != "pilot":
-            raise ProvisionError(f"rollback expects FNB in pilot or suspended, not {psp.get('status')}")
+            raise ProvisionError(f"rollback expects {self.name} in pilot or suspended, not {psp.get('status')}")
 
-        terms = nested(self.config, "fnb.commercial_terms.limits")
+        terms = nested(self.config, "partner.commercial_terms.limits")
         percentage = int(nested(self.config, "pilot.limit_percentage", 10))
-        reason = nested(self.config, "pilot.rollback_reason", "Disable FNB pilot and preserve audit trail")
+        reason = nested(self.config, "pilot.rollback_reason", f"Disable {self.name} pilot and preserve audit trail")
         self.admin.call("PUT", f"/admin/psps/{psp['id']}/pilot", {
             "per_transaction": percentage_amount(terms["per_transaction"], percentage),
             "daily": percentage_amount(terms["daily"], percentage),
@@ -832,26 +856,26 @@ class Provisioner:
                 "reason": reason, "emergency": False,
             })
             approval_id = prepared["approval"]["id"]
-        self.approve(approval_id, "Approve controlled FNB pilot suspension")
+        self.approve(approval_id, f"Approve controlled {self.name} pilot suspension")
         suspended = self.psp()
         if suspended.get("status") != "suspended":
-            raise ProvisionError("Gateway accepted the approval but FNB is not suspended")
+            raise ProvisionError(f"Gateway accepted the approval but {self.name} is not suspended")
         self.state["suspended_at"] = dt.datetime.now(dt.timezone.utc).isoformat()
         self.save()
         self.report("pilot_suspended")
         return 0
 
     def verify_launch_matrix(self) -> None:
-        self.step("verify live cash-deposit route in launch matrix")
+        self.step("verify the partner's live routes in the launch matrix")
         if self.dry_run:
             return
         _, matrix, _ = self.admin.call("GET", "/admin/launch-matrix")
-        enabled = live_cash_deposit_enabled(matrix)
-        self.state["live_cash_deposit_route_enabled"] = enabled
+        missing = missing_routes(matrix, launch_routes(self.config))
+        self.state["launch_routes_enabled"] = not missing
         self.state["launch_matrix_version"] = matrix.get("version") or matrix.get("matrix", {}).get("version")
         self.save()
-        if not enabled:
-            raise ProvisionError("the active launch matrix does not enable live partner_api/cash cash deposits")
+        if missing:
+            raise ProvisionError("the active launch matrix does not enable " + ", ".join(route_text(r) for r in missing))
 
     def report(self, outcome: str) -> None:
         report = {
@@ -863,9 +887,9 @@ class Provisioner:
             "live_cash_deposit_route_enabled": self.state.get("live_cash_deposit_route_enabled", False),
             "certification": self.state.get("certification_run"),
             "test_invoices": self.state.get("test_invoices", {}),
-            "fnb_live_api_key_id": self.state.get("fnb_live_api_key_id"),
-            "fnb_live_api_key_expires_at": self.state.get("fnb_live_api_key_expires_at"),
-            "fnb_live_api_key_scopes": ["transactions:read", "transactions:write", "bills:read",
+            "partner_live_api_key_id": self.state.get("partner_live_api_key_id"),
+            "partner_live_api_key_expires_at": self.state.get("partner_live_api_key_expires_at"),
+            "partner_live_api_key_scopes": ["transactions:read", "transactions:write", "bills:read",
                                          "bills:artifacts", "events:read", "reconciliation:read",
                                          "reconciliation:write"],
             "pilot_routing_disabled": self.state.get("pilot_routing_disabled", False),
@@ -895,8 +919,9 @@ class Provisioner:
     def plan(self) -> int:
         self.require_runtime()
         _, matrix, _ = self.admin.call("GET", "/admin/launch-matrix")
-        if not live_cash_deposit_enabled(matrix):
-            raise ProvisionError("the active launch matrix does not enable live partner_api/cash cash deposits")
+        missing = missing_routes(matrix, launch_routes(self.config))
+        if missing:
+            raise ProvisionError("the active launch matrix does not enable " + ", ".join(route_text(r) for r in missing))
         self.admin.call("GET", "/admin/accounts")
         self.checker.call("GET", "/admin/approvals?pending=1")
         if nested(self.config, "operators.create_workforce_users", True):
@@ -917,8 +942,8 @@ class Provisioner:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("command", choices=("plan", "apply", "rollback"))
-    parser.add_argument("--config", default=os.environ.get("FNB_PILOT_CONFIG", "/config/fnb-pilot.yaml"))
-    parser.add_argument("--output", default=os.environ.get("FNB_PILOT_OUTPUT", "/output"))
+    parser.add_argument("--config", default=os.environ.get("PSP_CONFIG", os.environ.get("FNB_PILOT_CONFIG", "/config/psp.yaml")))
+    parser.add_argument("--output", default=os.environ.get("PSP_OUTPUT", os.environ.get("FNB_PILOT_OUTPUT", "/output")))
     return parser.parse_args()
 
 

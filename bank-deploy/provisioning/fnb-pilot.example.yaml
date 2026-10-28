@@ -1,4 +1,5 @@
-# FNB cash-deposit pilot provisioning.
+# FNB cash-deposit pilot provisioning (psp_provision.py: one provisioner for
+# every partner; simulator-bank.example.yaml is the dev twin).
 #
 # Copy this file to fnb-pilot.yaml, fill every value marked REQUIRED, and keep
 # the completed file outside version control. Put referenced evidence beside
@@ -30,7 +31,7 @@ operators:
     kuloffice_role: Revisores
     gateway_operator: true
     solange_roles: []
-  fnb_technical:
+  partner_technical:
     email: ""                 # REQUIRED
     first_name: ""            # REQUIRED
     last_name: ""             # REQUIRED
@@ -38,7 +39,8 @@ operators:
     gateway_operator: false
     solange_roles: []
 
-fnb:
+partner:
+  short_name: FNB             # in reasons, key names and messages
   legal_name: ""              # REQUIRED
   registration_number: ""     # REQUIRED
   partner_type: bank
@@ -55,6 +57,10 @@ fnb:
     name: ""                  # REQUIRED
     email: ""                 # REQUIRED
     phone: ""
+  # The launch-matrix routes this partner needs live (the provisioner stops
+  # before anything is created when one is not enabled).
+  launch_routes:
+    - {operation: cash_deposit, driver: partner_api, method: cash, mode: live, scope: acc_top}
   expected_monthly_volume: 1000
   expected_monthly_value: "10000000"
   risk_tier: medium

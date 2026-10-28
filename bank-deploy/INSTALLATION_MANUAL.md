@@ -210,8 +210,8 @@ The root credential is retained only by MinIO and its one-shot initializer.
 9. Validate and provision the controlled FNB cash-deposit pilot:
 
    ```sh
-   ENV_FILE=.env sh scripts/provision-fnb-pilot.sh plan
-   ENV_FILE=.env sh scripts/provision-fnb-pilot.sh apply
+   ENV_FILE=.env sh scripts/provision-psp.sh plan
+   ENV_FILE=.env sh scripts/provision-psp.sh apply
    ```
 
    These commands use Docker Compose directly through the included wrapper;
@@ -222,7 +222,7 @@ The root credential is retained only by MinIO and its one-shot initializer.
    the mandatory certification cases; run the same command again afterwards.
    Store `fnb-pilot-output/secrets.json` in the bank's secrets vault. To stop
    the pilot without deleting evidence or audit history, run
-   `ENV_FILE=.env sh scripts/provision-fnb-pilot.sh rollback`; this removes
+   `ENV_FILE=.env sh scripts/provision-psp.sh rollback`; this removes
    eligible pilot merchants and then suspends the PSP through maker/checker
    approval.
 
