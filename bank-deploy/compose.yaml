@@ -266,6 +266,8 @@ services:
       db-init: {condition: service_completed_successfully}
       gateway-config: {condition: service_completed_successfully}
     command: [--config, /etc/kulpay/kulpay-payments.yaml]
+    extra_hosts:
+      - ${KEYCLOAK_PUBLIC_HOST:-auth.kulpay.bank.example}:${TLS_PROXY_ADDRESS:-10.251.0.1}
     environment:
       KULPAY_MODE: live
       KULPAY_DB_URL: postgres://gateway:${GATEWAY_DB_PASSWORD}@db:5432/gateway?sslmode=disable
@@ -280,7 +282,12 @@ services:
       KULPAY_ACCOUNT_NAME: KulPay
       KULPAY_ACCOUNT_ID: ${GATEWAY_ACCOUNT_ID}
       KULPAY_LOG_FORMAT: json
-      KULPAY_OIDC_ENABLED: "false"
+      KULPAY_OIDC_ENABLED: "true"
+      KULPAY_OIDC_ISSUER_URL: ${KEYCLOAK_PUBLIC_URL}/realms/${WORKFORCE_REALM:-workforce}
+      KULPAY_OIDC_CLIENT_ID: ${GATEWAY_OIDC_CLIENT_ID:-kulpay-gateway-admin}
+      KULPAY_OIDC_CLIENT_SECRET: ${GATEWAY_OIDC_CLIENT_SECRET:?set GATEWAY_OIDC_CLIENT_SECRET}
+      KULPAY_OIDC_REDIRECT_URI: ${GATEWAY_MGMT_PUBLIC_URL:?set GATEWAY_MGMT_PUBLIC_URL}/admin/callback
+      KULPAY_OIDC_REQUIRED_ROLE: operator
       KULPAY_TRUSTED_PROXIES: ${KULPAY_TRUSTED_PROXIES:-127.0.0.0/8,::1/128,10.251.0.1}
       KULPAY_CONNECTORS_MANUAL_ENABLED: "false"
       KULPAY_KULOFFICE_BASE_URL: http://kuloffice:8080
@@ -296,6 +303,7 @@ services:
       - ./gateway/launch_matrix.json:/etc/kulpay/launch_matrix.json:ro
     ports:
       - ${PUBLISH_ADDRESS:-127.0.0.1}:${GATEWAY_PORT:-9480}:9090
+      - ${PUBLISH_ADDRESS:-127.0.0.1}:${GATEWAY_MGMT_PORT:-9481}:9091
     healthcheck:
       test: [CMD, kulpay-payments, healthcheck]
       interval: 15s

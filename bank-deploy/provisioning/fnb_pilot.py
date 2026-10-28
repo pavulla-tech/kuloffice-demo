@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import html
+import http.cookies
 import json
 import mimetypes
 import os
@@ -116,11 +117,59 @@ def load_config(path: Path) -> dict[str, Any]:
         "fnb.kyb.screenings.pep.reference", "fnb.commercial_terms.contract_ref",
         "fnb.commercial_terms.signed_contract_file", "fnb.statement_profile.sample_file",
         "fnb.statement_profile.profile.standard", "fnb.statement_profile.profile.accounts",
+        "fnb.commercial_terms.settlement.account",
+        "test_business.business_name", "test_business.biller.code", "test_business.biller.name",
+        "test_business.product.code", "test_business.product.name",
+        "test_business.invoices.rf.number", "test_business.invoices.rf.account_reference",
+        "test_business.invoices.rf.amount", "test_business.invoices.qr.number",
+        "test_business.invoices.qr.account_reference", "test_business.invoices.qr.amount",
     ])
     maker = nested(value, "operators.maker.email").strip().lower()
     checker = nested(value, "operators.checker.email").strip().lower()
     if maker == checker:
         raise ProvisionError("maker and checker must be different people")
+    for name in ("operators.maker.email", "operators.checker.email", "operators.fnb_technical.email",
+                 "fnb.technical_contact.email", "fnb.compliance_contact.email"):
+        email = str(nested(value, name, "")).strip()
+        if not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", email):
+            raise ProvisionError(f"{name} must be an email address")
+    for name, low, high in (("pilot.limit_percentage", 1, 100), ("pilot.routing_weight", 1, 100),
+                            ("pilot.credential_valid_days", 1, 365)):
+        try:
+            number = int(nested(value, name))
+        except (TypeError, ValueError) as error:
+            raise ProvisionError(f"{name} must be an integer") from error
+        if number < low or number > high:
+            raise ProvisionError(f"{name} must be between {low} and {high}")
+    for name in ("fnb.expected_monthly_volume",):
+        try:
+            if int(nested(value, name)) <= 0:
+                raise ValueError
+        except (TypeError, ValueError) as error:
+            raise ProvisionError(f"{name} must be a positive integer") from error
+    for name in ("fnb.expected_monthly_value", "fnb.commercial_terms.limits.per_transaction",
+                 "fnb.commercial_terms.limits.daily", "fnb.commercial_terms.limits.monthly",
+                 "test_business.invoices.rf.amount", "test_business.invoices.qr.amount"):
+        try:
+            if Decimal(str(nested(value, name))) <= 0:
+                raise ValueError
+        except (ValueError, ArithmeticError) as error:
+            raise ProvisionError(f"{name} must be a positive amount") from error
+    standard = str(nested(value, "fnb.statement_profile.profile.standard", "")).strip().lower()
+    if standard != "csv":
+        raise ProvisionError("fnb.statement_profile.profile.standard must be csv for automated certification")
+    matrix = nested(value, "fnb.capability_matrix", {})
+    types = matrix.get("types", []) if isinstance(matrix, dict) else []
+    rows = {(str(row.get("type", "")).upper(), method)
+            for row in types if isinstance(row, dict) for method in row.get("methods", [])}
+    for needed in (("NAME_LOOKUP", "cash_deposit"), ("CASH_IN", "cash_deposit")):
+        if needed not in rows:
+            raise ProvisionError(f"fnb.capability_matrix must enable {needed[0]}/{needed[1]}")
+    capabilities = matrix.get("capabilities", []) if isinstance(matrix, dict) else []
+    incoming = next((row for row in capabilities if row.get("name") == "account_funding.incoming"), None)
+    if not incoming or not {"test", "live"}.issubset(set(incoming.get("modes", []))) or \
+            "MZN" not in incoming.get("currencies", []):
+        raise ProvisionError("fnb.capability_matrix must enable account_funding.incoming in test and live for MZN")
     if not nested(value, "fnb.kyb.documents"):
         raise ProvisionError("fnb.kyb.documents must list every required KYB document")
     for name in ("fnb.commercial_terms.signed_contract_file", "fnb.statement_profile.sample_file"):
@@ -184,6 +233,8 @@ class HTTP:
             raise ProvisionError(f"{method} {path} failed: HTTP {error.code}: {detail}") from error
         except urllib.error.URLError as error:
             raise ProvisionError(f"{method} {path} failed: {error.reason}") from error
+        except urllib.error.URLError as error:
+            raise ProvisionError(f"{method} {path} failed: {error.reason}") from error
 
     def multipart(self, path: str, fields: dict[str, str], files: dict[str, Path],
                   expected: tuple[int, ...] = (200, 201, 202), method: str = "POST") -> Any:
@@ -242,7 +293,7 @@ class Provisioner:
     def require_runtime(self, include_keycloak: bool = True) -> None:
         names = ["GATEWAY_ADMIN_KEY", "GATEWAY_CHECKER_KEY"]
         if include_keycloak and nested(self.config, "operators.create_workforce_users", True):
-            names.append("KC_ADMIN_PASSWORD")
+            names.extend(("KC_ADMIN_PASSWORD", "GATEWAY_OIDC_CLIENT_SECRET", "GATEWAY_MGMT_PUBLIC_URL"))
         for name in names:
             if not os.environ.get(name, "").strip():
                 raise ProvisionError(f"{name} is required in the deployment environment")
@@ -284,6 +335,16 @@ class Provisioner:
             raise ProvisionError(f"Keycloak admin login failed: HTTP {status}")
         token = token_doc["access_token"]
         realm = os.environ.get("WORKFORCE_REALM", "workforce")
+        client_result = subprocess.run(["python3", "/tools/gateway_admin_client.py"], env=os.environ.copy(),
+                                       stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=False)
+        if client_result.returncode != 0:
+            raise ProvisionError("could not create or update the Gateway workforce client")
+        client_id = os.environ.get("GATEWAY_OIDC_CLIENT_ID", "kulpay-gateway-admin")
+        status, clients = self.keycloak_call("GET", f"/admin/realms/{realm}/clients?" +
+                                             urllib.parse.urlencode({"clientId": client_id}), token)
+        if status != 200 or not isinstance(clients, list) or not clients:
+            raise ProvisionError(f"Gateway workforce client {client_id} was not found after provisioning")
+        gateway_client_uuid = clients[0]["id"]
         passwords = self.secret_values.setdefault("workforce_temporary_passwords", {})
         for role in ("maker", "checker", "fnb_technical"):
             person = nested(self.config, f"operators.{role}")
@@ -321,10 +382,18 @@ class Provisioner:
             status, users = self.keycloak_call("GET", f"/admin/realms/{realm}/users?{query}", token)
             if status != 200 or not users:
                 raise ProvisionError(f"workforce helper completed but {email} was not found")
+            gateway_operator = False
+            if person.get("gateway_operator", False):
+                status, roles = self.keycloak_call(
+                    "GET", f"/admin/realms/{realm}/users/{users[0]['id']}/role-mappings/clients/{gateway_client_uuid}", token)
+                gateway_operator = status == 200 and isinstance(roles, list) and any(
+                    role.get("name") == "operator" for role in roles)
+                if not gateway_operator:
+                    raise ProvisionError(f"Gateway operator role was not granted to {email}")
             self.state.setdefault("workforce_users", {})[role] = {
                 "id": users[0]["id"], "email": email, "reused": reused,
                 "kuloffice_role": person.get("kuloffice_role", ""),
-                "gateway_operator": bool(person.get("gateway_operator", False)),
+                "gateway_operator": gateway_operator,
                 "solange_roles": person.get("solange_roles", []) or [],
             }
             self.save()
@@ -335,11 +404,21 @@ class Provisioner:
             raise ProvisionError("Gateway did not return an approval id")
         self.checker.call("POST", f"/admin/approvals/{approval_id}/decide", {"approve": True, "reason": reason})
 
-    def pending_approval(self, subject_id: str, kind: str) -> str:
+    def pending_approval(self, subject_id: str, kind: str, config_kind: str = "") -> str:
         _, body, _ = self.admin.call("GET", "/admin/approvals?" + urllib.parse.urlencode({
             "subject_id": subject_id, "pending": "1",
         }))
-        item = next((row for row in body.get("data", []) if row.get("kind") == kind), None)
+        def matches(row: dict[str, Any]) -> bool:
+            if row.get("kind") != kind:
+                return False
+            if not config_kind:
+                return True
+            try:
+                payload = json.loads(row.get("payload", "{}"))
+            except (TypeError, json.JSONDecodeError):
+                return False
+            return payload.get("kind") == config_kind
+        item = next((row for row in body.get("data", []) if matches(row)), None)
         return item.get("id", "") if item else ""
 
     def accounts(self) -> list[dict[str, Any]]:
@@ -374,6 +453,8 @@ class Provisioner:
             payload["tenant_id"] = account["id"]
             _, biller, _ = self.admin.call("POST", "/admin/billers", payload)
             products = []
+        if biller.get("tenant_id") != account["id"]:
+            raise ProvisionError(f"biller code {code} belongs to another account; choose a unique pilot biller code")
         self.state["biller_id"] = biller["id"]
 
         product_cfg = dict(nested(self.config, "test_business.product"))
@@ -393,11 +474,14 @@ class Provisioner:
         biller_key = self.secret_values.get("test_biller_api_key", "")
         if not biller_key:
             _, issued, _ = self.admin.call("POST", f"/admin/accounts/{account['id']}/keys", {
-                "name": "FNB pilot invoice presenter", "type": "sk", "no_expiry": True,
+                "name": "FNB pilot invoice presenter", "type": "sk",
                 "scopes": ["invoices:read", "invoices:write"],
             })
             biller_key = issued["key"]["secret"]
             self.secret_values["test_biller_api_key"] = biller_key
+            self.state["test_biller_api_key_id"] = issued["key"].get("id")
+            self.state["test_biller_api_key_expires_at"] = issued["key"].get("expires_at")
+            self.save()
         biller_api = HTTP(os.environ.get("GATEWAY_PUBLIC_INTERNAL_URL", "http://gateway:9090/v1"), biller_key)
         if not biller_api.base.endswith("/v1"):
             biller_api.base += "/v1"
@@ -442,6 +526,10 @@ class Provisioner:
         _, listed, _ = self.admin.call("GET", "/admin/psps")
         existing = next((item for item in listed.get("data", []) if item.get("legal_name") == self.config["fnb"]["legal_name"]), None)
         if existing:
+            if not self.secret_values.get("application_draft_token"):
+                raise ProvisionError(
+                    "an FNB PSP already exists but its one-time application token is not in the output directory; "
+                    "restore the original fnb-pilot-output directory before resuming")
             self.state["psp_id"] = existing["id"]
             self.state["application_id"] = existing.get("application_id", "")
             self.save()
@@ -518,7 +606,7 @@ class Provisioner:
         if not any(item.get("status") == "active" for item in versions.get("data", [])):
             terms = dict(nested(self.config, "fnb.commercial_terms"))
             contract_file = Path(str(terms.pop("signed_contract_file"))).expanduser()
-            approval_id = self.pending_approval(psp["id"], "config.activate")
+            approval_id = self.pending_approval(psp["id"], "config.activate", "commercial_terms")
             if not approval_id:
                 _, prepared, _ = self.admin.call("POST", f"/admin/psps/{psp['id']}/configs/commercial_terms", {
                     "document": terms, "reason": "FNB pilot commercial terms",
@@ -539,7 +627,7 @@ class Provisioner:
         _, versions, _ = self.admin.call("GET", f"/admin/psps/{psp_id}/configs?kind=capability_matrix")
         if any(item.get("status") == "active" for item in versions.get("data", [])):
             return
-        approval_id = self.pending_approval(psp_id, "config.activate")
+        approval_id = self.pending_approval(psp_id, "config.activate", "capability_matrix")
         if not approval_id:
             _, prepared, _ = self.admin.call("POST", f"/admin/psps/{psp_id}/configs/capability_matrix", {
                 "document": nested(self.config, "fnb.capability_matrix"),
@@ -558,8 +646,27 @@ class Provisioner:
         if not app_id or not token:
             raise ProvisionError(f"cannot reveal {which} key: application draft token is unavailable")
         base = os.environ.get("GATEWAY_PUBLIC_INTERNAL_URL", "http://gateway:9090").rstrip("/")
+        application_cookie = f"kulpay_psp_application={app_id}.{token}"
+        page_request = urllib.request.Request(base + "/onboarding", method="GET", headers={"Cookie": application_cookie})
+        try:
+            with urllib.request.urlopen(page_request, timeout=60) as response:
+                set_cookies = response.headers.get_all("Set-Cookie") or []
+                response.read()
+        except urllib.error.HTTPError as error:
+            raise ProvisionError(f"could not establish onboarding session: HTTP {error.code}") from error
+        except urllib.error.URLError as error:
+            raise ProvisionError(f"could not establish onboarding session: {error.reason}") from error
+        csrf = ""
+        for raw_cookie in set_cookies:
+            parsed = http.cookies.SimpleCookie()
+            parsed.load(raw_cookie)
+            if "kulpay_csrf" in parsed:
+                csrf = parsed["kulpay_csrf"].value
+        if not csrf:
+            raise ProvisionError("Gateway did not issue the onboarding CSRF cookie")
         request = urllib.request.Request(base + f"/onboarding/{which}-key", data=b"", method="POST", headers={
-            "Cookie": f"kulpay_psp_application={app_id}.{token}",
+            "Cookie": application_cookie + "; kulpay_csrf=" + csrf,
+            "X-CSRF-Token": csrf,
             "Content-Type": "application/x-www-form-urlencoded",
         })
         try:
@@ -567,6 +674,8 @@ class Provisioner:
                 page = response.read().decode(errors="replace")
         except urllib.error.HTTPError as error:
             raise ProvisionError(f"could not reveal {which} key: HTTP {error.code}") from error
+        except urllib.error.URLError as error:
+            raise ProvisionError(f"could not reveal {which} key: {error.reason}") from error
         token_value = extract_one_time_key(which, page)
         self.secret_values[which + "_api_key"] = token_value
         self.save()
@@ -784,6 +893,19 @@ class Provisioner:
         return 0
 
     def plan(self) -> int:
+        self.require_runtime()
+        _, matrix, _ = self.admin.call("GET", "/admin/launch-matrix")
+        if not live_cash_deposit_enabled(matrix):
+            raise ProvisionError("the active launch matrix does not enable live partner_api/cash cash deposits")
+        self.admin.call("GET", "/admin/accounts")
+        self.checker.call("GET", "/admin/approvals?pending=1")
+        if nested(self.config, "operators.create_workforce_users", True):
+            status, _ = self.keycloak_call("POST", "/realms/master/protocol/openid-connect/token", form={
+                "grant_type": "password", "client_id": "admin-cli",
+                "username": os.environ.get("KC_ADMIN_USER", "admin"), "password": os.environ["KC_ADMIN_PASSWORD"],
+            })
+            if status != 200:
+                raise ProvisionError(f"Keycloak admin login failed during preflight: HTTP {status}")
         for action in (self.verify_launch_matrix, self.ensure_users, self.ensure_test_business, self.ensure_application,
                        self.ensure_kyb, self.ensure_commercial, self.ensure_capabilities, self.ensure_certification,
                        self.ensure_pilot):
@@ -812,6 +934,9 @@ def main() -> int:
         return provisioner.apply()
     except ProvisionError as error:
         log("ERROR " + str(error))
+        return 2
+    except (OSError, ValueError, json.JSONDecodeError, urllib.error.URLError) as error:
+        log("ERROR provisioning input or runtime failed: " + str(error))
         return 2
 
 

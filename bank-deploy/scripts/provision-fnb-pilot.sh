@@ -17,8 +17,9 @@ config_name=$(basename "$config")
 output_abs=$(cd "$output" && pwd)
 
 docker compose --env-file "$env_file" -f compose.yaml --profile provisioning run --rm --no-deps \
+  --entrypoint python3 \
   -e FNB_PILOT_CONFIG="/input/$config_name" \
   -e FNB_PILOT_OUTPUT=/output \
   -v "$config_dir_abs:/input:ro" \
   -v "$output_abs:/output" \
-  provisioner python3 /bank/fnb_pilot.py "$command"
+  provisioner /bank/fnb_pilot.py "$command"

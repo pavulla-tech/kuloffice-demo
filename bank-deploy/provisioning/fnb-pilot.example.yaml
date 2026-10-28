@@ -108,6 +108,17 @@ fnb:
         idempotency: true
         confirmation: polling
         timeout_ms: 10000
+      - type: CASH_IN
+        methods: [cash_deposit]
+        direction: inbound
+        mode: sync
+        currencies: [MZN]
+        countries: [MZ]
+        partial: false
+        three_ds: false
+        idempotency: true
+        confirmation: polling
+        timeout_ms: 10000
     capabilities:
       - name: account_funding.incoming
         modes: [test, live]
@@ -118,7 +129,7 @@ fnb:
     sample_file: ""           # REQUIRED; real FNB sample statement
     profile:
       id: fnb-cash-deposits
-      standard: ""            # REQUIRED: camt.053, MT940, CSV, etc.
+      standard: csv            # Automated certification currently consumes CSV.
       direction: push
       channel: api_upload
       frequency: daily

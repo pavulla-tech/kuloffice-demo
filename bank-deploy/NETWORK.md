@@ -14,6 +14,7 @@ remote load balancer requires a dedicated private `PUBLISH_ADDRESS`,
 | KulOffice API | 9280 | Mobile/web clients, Solange and Gateway signed events |
 | KulPay Web | 9380 | Customer browsers and checkout approval redirects |
 | Gateway public API/callbacks | 9480 | Approved PSPs and customer checkout flows |
+| Gateway operator UI (`/admin` only) | 9481 | Authorized workforce browsers through the payments hostname |
 | Solange QR edge | 9580 | QR scanners and KulOffice |
 | Solange Console | 9680 | Authorized staff browsers |
 | KulPortal | 9780 | Authorized workforce browsers |
@@ -39,7 +40,7 @@ balancer's exact private address or smallest approved CIDR.
 | 5001 | BLNK API | KulOffice and BLNK worker |
 | 9000 | MinIO S3 API | Boquisso and MinIO initialization/backup jobs |
 | 8080 | Boquisso | KulOffice only |
-| 9091 | Gateway management API | KulOffice and controlled provisioning jobs |
+| 9091 | Gateway management API | KulOffice and controlled provisioning jobs; the proxy may expose only its OIDC-protected `/admin` UI |
 
 Do not publish these ports, add host mappings for them, or route them through
 the public load balancer.
