@@ -9,12 +9,18 @@ MODULE_PATH = pathlib.Path(__file__).with_name("gateway_kuloffice.py")
 SPEC = importlib.util.spec_from_file_location("gateway_kuloffice", MODULE_PATH)
 gateway = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(gateway)
+gateway.ACCOUNT_ID = "acc_kuloffice"
+gateway.CHECKER_KEY = "checker-key"
+
+ACTIVE_BILLER = {"id": "bil_1", "code": "KULPAY", "tenant_id": "acc_kuloffice", "status": "active"}
 
 
 class FakeGateway:
-    def __init__(self, incoming=None, sink=None):
+    def __init__(self, incoming=None, sink=None, biller=ACTIVE_BILLER, approvals=()):
         self.incoming = incoming
         self.sink = sink
+        self.biller = dict(biller) if biller else None
+        self.approvals = list(approvals)
         self.calls = []
 
     def __call__(self, method, path, key, body=None):
@@ -38,6 +44,20 @@ class FakeGateway:
             return 200, {"secret": "service-rolled"}
         if method == "POST" and path.startswith("/admin/accounts/") and path.endswith("/keys"):
             return 201, {"key": {"id": "key_1", "secret": "partners-new"}}
+        if method == "GET" and path == "/admin/billers/KULPAY":
+            if self.biller is None:
+                raise RuntimeError("GET /admin/billers/KULPAY failed: 404 {\"error\":\"not_found\"}")
+            return 200, {"biller": self.biller, "products": []}
+        if method == "POST" and path == "/admin/billers":
+            self.biller = {**body, "id": "bil_new", "status": "draft"}
+            return 201, self.biller
+        if method == "GET" and path.startswith("/admin/approvals?"):
+            return 200, {"data": self.approvals}
+        if method == "POST" and path == "/admin/billers/KULPAY/status":
+            return 202, {"approval": {"id": "apr_new"}}
+        if method == "POST" and path.startswith("/admin/approvals/") and path.endswith("/decide"):
+            self.biller["status"] = "active"
+            return 200, {"approval": {"id": path.split("/")[3], "status": "approved"}}
         raise AssertionError((method, path, body))
 
 
@@ -194,6 +214,86 @@ class PartnersKeyTest(unittest.TestCase):
 
     def tearDown(self):
         gateway.BILLER_PROVISIONING, gateway.HAVE_PARTNERS_KEY = False, False
+
+
+class KulOfficeBillerTest(unittest.TestCase):
+    def setUp(self):
+        gateway.ADMIN_KEY = "admin-key"
+        gateway.ACCOUNT_ID = "acc_kuloffice"
+        gateway.CHECKER_KEY = "checker-key"
+
+    def ensure(self, fake):
+        gateway.request = fake
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            summary = gateway.ensure_kuloffice_biller()
+        return summary, stderr.getvalue()
+
+    def test_a_missing_biller_is_created_activated_and_approved(self):
+        fake = FakeGateway(biller=None)
+        summary, stderr = self.ensure(fake)
+        self.assertEqual(summary, "created, activation requested, activated")
+        self.assertEqual(stderr.strip(), "KulOffice biller KULPAY: created, activation requested, activated")
+        self.assertNotIn("admin-key", stderr)
+        self.assertNotIn("checker-key", stderr)
+        steps = [(c[0], c[1].split("?")[0], c[2]) for c in fake.calls]
+        self.assertEqual(steps, [
+            ("GET", "/admin/billers/KULPAY", "admin-key"),
+            ("POST", "/admin/billers", "admin-key"),
+            ("GET", "/admin/approvals", "admin-key"),
+            ("POST", "/admin/billers/KULPAY/status", "admin-key"),
+            ("POST", "/admin/approvals/apr_new/decide", "checker-key"),
+        ])
+        created = fake.calls[1][3]
+        self.assertEqual(created, {
+            "code": "KULPAY", "name": "KulPay", "category": "other", "country": "MZ",
+            "support_email": "developers@pavulla.com", "tenant_id": "acc_kuloffice",
+            "presentment_modes": ["push"], "remit_bank": "FNB", "remit_account": "0028000090002922",
+            "remit_frequency": "daily",
+        })
+        self.assertIn("subject_id=bil_new", fake.calls[2][1])
+        self.assertEqual(fake.calls[3][3]["status"], "active")
+        self.assertTrue(fake.calls[4][3]["approve"])
+
+    def test_an_active_biller_is_only_read(self):
+        fake = FakeGateway()
+        summary, _ = self.ensure(fake)
+        self.assertEqual(summary, "already active")
+        self.assertEqual([c[:2] for c in fake.calls], [("GET", "/admin/billers/KULPAY")])
+
+    def test_a_biller_of_another_tenant_fails_without_changes(self):
+        fake = FakeGateway(biller={**ACTIVE_BILLER, "tenant_id": "acc_someone_else", "status": "draft"})
+        gateway.request = fake
+        with self.assertRaisesRegex(RuntimeError, "belongs to another account"):
+            gateway.ensure_kuloffice_biller()
+        self.assertEqual([c[:2] for c in fake.calls], [("GET", "/admin/billers/KULPAY")])
+
+    def test_a_pending_activation_is_approved_without_a_second_request(self):
+        fake = FakeGateway(
+            biller={**ACTIVE_BILLER, "status": "draft"},
+            approvals=[{"id": "apr_other", "kind": "bill.product_limits"},
+                       {"id": "apr_pending", "kind": "bill.biller_status"}],
+        )
+        summary, _ = self.ensure(fake)
+        self.assertEqual(summary, "activated")
+        self.assertFalse(any(c[1] == "/admin/billers/KULPAY/status" for c in fake.calls))
+        decided = [c for c in fake.calls if c[1].endswith("/decide")]
+        self.assertEqual([(c[1], c[2]) for c in decided], [("/admin/approvals/apr_pending/decide", "checker-key")])
+
+    def test_main_ensures_the_biller(self):
+        gateway.ACCOUNT_KEY, gateway.MODE = "account-key", "live"
+        gateway.HAVE_INCOMING_SECRET = gateway.HAVE_SERVICE_SECRET = True
+        fake = FakeGateway(
+            incoming={"id": "wh_1", "mode": "live", "url": gateway.URL, "status": "active", "event_types": ["*"]},
+            sink={"id": "sink_1", "mode": "live", "url": gateway.URL, "enabled": True, "event_types": ["payment.*"]},
+            biller=None,
+        )
+        gateway.request = fake
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(io.StringIO()):
+            gateway.main()
+        self.assertEqual(stdout.getvalue(), "")
+        self.assertEqual(fake.biller["status"], "active")
 
 
 if __name__ == "__main__":

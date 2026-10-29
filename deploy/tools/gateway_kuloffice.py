@@ -1,4 +1,5 @@
-"""Provision Gateway event delivery to KulOffice without printing secrets.
+"""Provision Gateway event delivery to KulOffice without printing secrets,
+and KulOffice's own Gateway biller (created and activated when missing).
 
 Stdout is deliberately machine-only KEY=value output captured by the host
 wrapper. Human progress goes to stderr. Existing endpoints are reused; if an
@@ -10,6 +11,7 @@ import json
 import os
 import sys
 import urllib.error
+import urllib.parse
 import urllib.request
 
 
@@ -37,6 +39,24 @@ CASH_IN_INCOMING = os.environ.get("GATEWAY_CASH_IN_INCOMING", "") == "1"
 # operator-only scope, issued by the admin key on KulOffice's own account).
 BILLER_PROVISIONING = os.environ.get("GATEWAY_BILLER_PROVISIONING", "") == "1"
 HAVE_PARTNERS_KEY = bool(os.environ.get("KULOFFICE_BILLER_PROVISIONING_GATEWAY_API_KEY", "").strip())
+# KulOffice's own biller: businesses' bills and payment requests are
+# presented at the Gateway under it (BillerByTenant on KulOffice's account);
+# without it POST /v1/biller/invoices answers 403 not_a_biller. A Gateway
+# reset loses it, so every run recreates and activates it when missing.
+# Activation is maker/checker: the admin key requests, the checker approves.
+CHECKER_KEY = os.environ.get("GATEWAY_CHECKER_KEY", "")
+BILLER_CODE = os.environ.get("GATEWAY_KULOFFICE_BILLER_CODE", "").strip().upper() or "KULPAY"
+BILLER = {
+    "code": BILLER_CODE,
+    "name": "KulPay",
+    "category": "other",
+    "country": "MZ",
+    "support_email": "developers@pavulla.com",
+    "presentment_modes": ["push"],
+    "remit_bank": os.environ.get("GATEWAY_KULOFFICE_REMIT_BANK", "").strip() or "FNB",
+    "remit_account": os.environ.get("GATEWAY_KULOFFICE_REMIT_ACCOUNT", "").strip() or "0028000090002922",
+    "remit_frequency": os.environ.get("GATEWAY_KULOFFICE_REMIT_FREQUENCY", "").strip() or "daily",
+}
 
 
 def request(method, path, key, body=None):
@@ -192,6 +212,52 @@ def ensure_partners_key():
     return secret
 
 
+def pending_biller_approval(biller_id):
+    query = urllib.parse.urlencode({"subject_id": biller_id, "pending": "1"})
+    _, listed = request("GET", "/admin/approvals?" + query, ADMIN_KEY)
+    row = next((row for row in data_rows(listed) if row.get("kind") == "bill.biller_status"), None)
+    return row.get("id", "") if row else ""
+
+
+def ensure_kuloffice_biller():
+    """KulOffice's biller on its own account, active; returns what was done."""
+    if not ACCOUNT_ID or not CHECKER_KEY:
+        raise RuntimeError("GATEWAY_ACCOUNT_ID and GATEWAY_CHECKER_KEY are required for KulOffice's biller")
+    code = BILLER["code"]
+    done = []
+    try:
+        _, current = request("GET", f"/admin/billers/{code}", ADMIN_KEY)
+        biller = (current or {}).get("biller") or {}
+    except RuntimeError as error:
+        if "failed: 404 " not in str(error):
+            raise
+        _, biller = request("POST", "/admin/billers", ADMIN_KEY, {**BILLER, "tenant_id": ACCOUNT_ID})
+        biller = biller or {}
+        done.append("created")
+    if biller.get("tenant_id") != ACCOUNT_ID:
+        raise RuntimeError(
+            f"Gateway biller {code} belongs to another account ({biller.get('tenant_id') or 'none'}); "
+            "left unchanged. Free the code or set GATEWAY_KULOFFICE_BILLER_CODE"
+        )
+    if biller.get("status") != "active":
+        if not biller.get("id"):
+            raise RuntimeError(f"Gateway returned biller {code} without its id")
+        approval_id = pending_biller_approval(biller["id"])
+        if not approval_id:
+            _, prepared = request("POST", f"/admin/billers/{code}/status", ADMIN_KEY,
+                                  {"status": "active", "reason": "KulOffice's own biller (kit provisioning)"})
+            approval_id = ((prepared or {}).get("approval") or {}).get("id", "")
+            if not approval_id:
+                raise RuntimeError(f"Gateway did not return an approval for activating biller {code}")
+            done.append("activation requested")
+        request("POST", f"/admin/approvals/{approval_id}/decide", CHECKER_KEY,
+                {"approve": True, "reason": "KulOffice's own biller (kit provisioning)"})
+        done.append("activated")
+    summary = ", ".join(done) if done else "already active"
+    print(f"KulOffice biller {code}: {summary}", file=sys.stderr)
+    return summary
+
+
 def main():
     if not ACCOUNT_KEY or not ADMIN_KEY:
         sys.exit("GATEWAY_API_KEY and GATEWAY_ADMIN_KEY are required")
@@ -199,6 +265,7 @@ def main():
         sys.exit("GATEWAY_MODE must be live or test")
     incoming = ensure_incoming_endpoint()
     service = ensure_service_sink()
+    ensure_kuloffice_biller()
     if CASH_IN_INCOMING:
         ensure_cash_in_incoming()
     partners = ensure_partners_key() if BILLER_PROVISIONING else ""

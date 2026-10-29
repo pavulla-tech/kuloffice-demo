@@ -420,7 +420,11 @@ make gateway-kuloffice
 ```
 
 The command idempotently creates KulOffice's account webhook for
-`incoming_transfer.*` and the platform `payment.*` event sink. Their one-time
+`incoming_transfer.*` and the platform `payment.*` event sink. It also makes sure
+KulOffice's own Gateway biller (`KULPAY`, owned by `GATEWAY_ACCOUNT_ID`) exists
+and is active: when missing it is created, its activation requested with the
+operator key and approved with `GATEWAY_CHECKER_KEY`; a biller with that code
+on another account stops the command unchanged. Their one-time
 signing secrets are written to the ignored `.env` without being printed, then
 KulOffice is recreated. If an endpoint exists but `.env` lost its secret, the
 command rotates that secret with a 24-hour grace period. The deployment tool's
