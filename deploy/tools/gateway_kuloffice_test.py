@@ -12,7 +12,7 @@ SPEC.loader.exec_module(gateway)
 gateway.ACCOUNT_ID = "acc_kuloffice"
 gateway.CHECKER_KEY = "checker-key"
 
-ACTIVE_BILLER = {"id": "bil_1", "code": "KULPAY", "tenant_id": "acc_kuloffice", "status": "active"}
+ACTIVE_BILLER = {"id": "bil_1", "code": "KULPAY", "tenant_id": "acc_kuloffice", "status": "active", "presentment_modes": ["push"]}
 INVOICE_PRODUCT = {"code": "FATURA", "amount_rule": "presented", "enabled": True}
 
 
@@ -282,11 +282,18 @@ class KulOfficeBillerTest(unittest.TestCase):
         self.assertEqual([c[:2] for c in fake.calls], [("GET", "/admin/billers/KULPAY")])
 
     def test_a_biller_made_by_hand_without_its_organisation_is_claimed(self):
-        fake = FakeGateway(biller={"id": "bil_1", "code": "KULPAY", "status": "active"})
+        fake = FakeGateway(biller={"id": "bil_1", "code": "KULPAY", "status": "active", "presentment_modes": ["push"]})
         summary, _ = self.ensure(fake)
         self.assertEqual(summary, "claimed for KulOffice's account")
         patch = next(c for c in fake.calls if c[0] == "PATCH")
         self.assertEqual((patch[1], patch[2], patch[3]), ("/admin/billers/KULPAY", "admin-key", {"tenant_id": "acc_kuloffice"}))
+
+    def test_a_biller_made_by_hand_without_push_presents_by_api(self):
+        fake = FakeGateway(biller={"id": "bil_1", "code": "KULPAY", "status": "active", "presentment_modes": ["file"]})
+        summary, _ = self.ensure(fake)
+        self.assertEqual(summary, "claimed for KulOffice's account, invoices presented by API")
+        patches = [c[3] for c in fake.calls if c[0] == "PATCH"]
+        self.assertEqual(patches, [{"tenant_id": "acc_kuloffice"}, {"presentment_modes": ["file", "push"]}])
 
     def test_a_biller_of_another_tenant_fails_without_changes(self):
         fake = FakeGateway(biller={**ACTIVE_BILLER, "tenant_id": "acc_someone_else", "status": "draft"})

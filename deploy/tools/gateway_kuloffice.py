@@ -263,6 +263,14 @@ def ensure_kuloffice_biller():
             f"Gateway biller {code} belongs to another account ({biller.get('tenant_id') or 'none'}); "
             "left unchanged. Free the code or set GATEWAY_KULOFFICE_BILLER_CODE"
         )
+    modes = biller.get("presentment_modes") or []
+    if "push" not in modes:
+        # KulOffice presents its invoices through the API: without "push" the
+        # Gateway refuses every one (400 "... is not set up to present
+        # invoices by push") and no request gets its pay link or reference.
+        _, saved = request("PATCH", f"/admin/billers/{code}", ADMIN_KEY, {"presentment_modes": [*modes, "push"]})
+        biller = {**biller, **(saved or {})}
+        done.append("invoices presented by API")
     if not any(p.get("enabled") and p.get("amount_rule") == "presented" for p in products):
         request("POST", f"/admin/billers/{code}/products", ADMIN_KEY, BILLER_PRODUCT)
         done.append("invoice product added")
