@@ -1,0 +1,238 @@
+# FNB on dev (gateway v0.1.2-alpha05 and later), for FNB to integrate
+# against: fnb-pilot.example.yaml without the declared SALE row, since these
+# images certify an incoming-funding partner by its own tasks (name lookup,
+# incoming transfer, cash deposit in the sandbox; GET /v1/certification/tasks).
+# Run with make psp-provision PSP=<filled copy> from deploy/.
+#
+# Copy this file to fnb-dev.yaml, fill every value marked REQUIRED, and keep
+# the completed file outside version control. Put referenced evidence beside
+# the YAML and use relative paths. Secrets stay in .env and in the
+# provisioner's protected output directory; they do not belong in this file.
+
+schema_version: 1
+
+deployment:
+  country: MZ
+  currency: MZN
+  language: pt
+  stop_at: pilot
+  output_directory: /output
+
+operators:
+  create_workforce_users: true
+  maker:
+    email: ""                 # REQUIRED
+    first_name: ""            # REQUIRED
+    last_name: ""             # REQUIRED
+    kuloffice_role: Revisores
+    gateway_operator: true
+    solange_roles: []
+  checker:
+    email: ""                 # REQUIRED; must differ from maker
+    first_name: ""            # REQUIRED
+    last_name: ""             # REQUIRED
+    kuloffice_role: Revisores
+    gateway_operator: true
+    solange_roles: []
+  partner_technical:
+    email: ""                 # REQUIRED
+    first_name: ""            # REQUIRED
+    last_name: ""             # REQUIRED
+    kuloffice_role: ""
+    gateway_operator: false
+    solange_roles: []
+
+partner:
+  short_name: FNB             # in reasons, key names and messages
+  legal_name: ""              # REQUIRED
+  registration_number: ""     # REQUIRED
+  partner_type: bank
+  licence:
+    type: ""                  # REQUIRED
+    number: ""                # REQUIRED
+    issuer: ""                # REQUIRED
+    expires_on: ""            # optional, YYYY-MM-DD
+  technical_contact:
+    name: ""                  # REQUIRED
+    email: ""                 # REQUIRED
+    phone: ""
+  compliance_contact:
+    name: ""                  # REQUIRED
+    email: ""                 # REQUIRED
+    phone: ""
+  # The launch-matrix routes this partner needs live (the provisioner stops
+  # before anything is created when one is not enabled).
+  launch_routes:
+    - {operation: cash_deposit, driver: partner_api, method: cash, mode: live, scope: acc_top}
+  expected_monthly_volume: 1000
+  expected_monthly_value: "10000000"
+  risk_tier: medium
+
+  # FNB's webhook endpoints, registered with FNB's own keys: test_url gets
+  # the certification's signed webhooks (it must reject a bad signature with
+  # a 4xx), live_url the pilot's. Their signing secrets land in secrets.json.
+  webhooks:
+    test_url: ""              # REQUIRED for certification
+    live_url: ""
+
+  kyb:
+    # Supply every document type required by the active Gateway catalogue.
+    # `type` examples are intentionally not guessed; use GET
+    # /v1/admin/catalogs/kyb_document_types/versions on the installed Gateway.
+    documents: []
+    # - type: ""
+    #   file: ""
+    screenings:
+      sanctions:
+        subject: ""           # REQUIRED
+        reference: ""         # REQUIRED; source/list reference
+        notes: ""
+      pep:
+        subject: ""           # REQUIRED
+        reference: ""         # REQUIRED; source/list reference
+        notes: ""
+
+  commercial_terms:
+    contract_ref: ""          # REQUIRED
+    signed_contract_file: ""  # REQUIRED; PDF or other signed copy
+    funds_flow: direct
+    fee_schedule:
+      - method: cash_deposit
+        percent: "0"
+        fixed: "0"
+        currency: MZN
+    settlement:
+      frequency_days: 1
+      currency: MZN
+      account: ""
+    limits:
+      per_transaction: "500000"
+      daily: "20000000"
+      monthly: "400000000"
+      currency: MZN
+
+  capability_matrix:
+    types:
+      - type: NAME_LOOKUP
+        methods: [cash_deposit]
+        direction: inbound
+        mode: sync
+        currencies: [MZN]
+        countries: [MZ]
+        partial: false
+        three_ds: false
+        idempotency: true
+        confirmation: polling
+        timeout_ms: 10000
+      - type: CASH_IN
+        methods: [cash_deposit]
+        direction: inbound
+        mode: sync
+        currencies: [MZN]
+        countries: [MZ]
+        partial: false
+        three_ds: false
+        idempotency: true
+        confirmation: polling
+        timeout_ms: 10000
+    capabilities:
+      - name: account_funding.incoming
+        modes: [test, live]
+        currencies: [MZN]
+        max_amount_minor: 100000000
+
+  # Certification's second round: the first names the sandbox payments FNB's
+  # statement must list (statement-request.json in the output directory);
+  # put FNB's statement (CSV: reference, amount, currency, date) here and run
+  # apply again.
+  certification_statement_file: ""
+
+  statement_profile:
+    sample_file: ""           # REQUIRED; real FNB sample statement
+    profile:
+      id: fnb-cash-deposits
+      standard: csv            # Automated certification currently consumes CSV.
+      direction: push
+      channel: api_upload
+      frequency: daily
+      cutoff: "23:00"
+      timezone: Africa/Maputo
+      arrival_window: 2h
+      granularity: transaction
+      security:
+        checksum: sha256
+      acknowledgement: api
+      currency: MZN
+      accounts: []             # REQUIRED; FNB receiving account(s)
+      # CSV/XLSX/JSON profiles also need parser settings and a mapping.
+    # Other statements FNB sends, installed beside the one above: the trust
+    # (client-funds) account's end-of-day statement with its opening and
+    # closing balances (camt.053, or MT940), which the daily safeguarding
+    # check reads. Each entry is {sample_file, profile: {...}} with a real
+    # FNB sample; unknown until FNB holds the trust account.
+    additional_profiles: []
+    # - sample_file: fnb-trust-camt053.xml
+    #   profile:
+    #     id: fnb-trust-eod
+    #     standard: camt.053
+    #     direction: push
+    #     channel: api_upload
+    #     frequency: daily
+    #     cutoff: "16:00"      # before the Gateway's 18:00 UTC check
+    #     timezone: Africa/Maputo
+    #     arrival_window: 2h
+    #     granularity: transaction
+    #     security:
+    #       checksum: sha256
+    #     acknowledgement: api
+    #     currency: MZN
+    #     accounts: []         # the trust account
+
+  # Accounts holding KulPay's client funds, registered as the Gateway's
+  # safeguarding accounts (their statements' closing balances are the money
+  # held). Unknown until FNB holds the trust account.
+  safeguarding_accounts: []
+  # - {account: "", currency: MZN, bank: FNB}
+
+pilot:
+  routing_weight: 10
+  limit_percentage: 10
+  credential_valid_days: 90
+  reason: Controlled FNB cash-deposit pilot
+  rollback_reason: Suspend controlled FNB pilot and preserve audit trail
+
+test_business:
+  business_name: FNB Pilot Test Business
+  country: MZ
+  biller:
+    code: FNBPILOT
+    name: FNB Pilot Test Biller
+    category: education
+    support_email: ""
+    presentment_modes: [push]
+    invoice_expiry_days: 30
+  product:
+    code: POSTPAID
+    name: Pilot postpaid invoice
+    shape: postpaid
+    currency: MZN
+    amount_rule: presented
+    reference_label: Customer account
+    reference_pattern: '^[A-Z0-9-]{3,40}$'
+    reference_example: FNB-PILOT-001
+    lookup_required: true
+    routable: true
+    model: agent
+    fee_bearer: biller
+    enabled: true
+  invoices:
+    rf:
+      number: FNB-RF-001
+      account_reference: FNB-PILOT-RF
+      amount: "100.00"
+      description: FNB pilot invoice paid with RF reference
+    qr:
+      number: FNB-QR-001
+      account_reference: FNB-PILOT-QR
+      amount: "125.00"
+      description: FNB pilot invoice paid from QR

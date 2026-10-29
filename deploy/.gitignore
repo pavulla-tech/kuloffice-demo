@@ -8,3 +8,4 @@ state/
 .ci.env
 bundles/
 simulator-bank-output/
+psp-output/

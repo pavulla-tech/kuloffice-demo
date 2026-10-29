@@ -6,7 +6,7 @@
 .PHONY: help setup sync-env clean-env-backups config check-images \
         images push bundle load theme license \
         start start-portal start-website stop restart logs ps update clean reset-blnk \
-        init operator gateway-signin solange-kulpay gateway-kuloffice cash-deposits gateway-billers simulator-bank \
+        init operator gateway-signin solange-kulpay gateway-kuloffice cash-deposits gateway-billers simulator-bank psp-provision \
         deploy rollback releases status health backup restore
 
 ENV_FILE ?= .env
@@ -60,6 +60,7 @@ help:
 	@echo "  make cash-deposits      partner cash deposits credit KulPay accounts (live; dev only)"
 	@echo "  make gateway-billers    billers approved in the back office provisioned at the Gateway"
 	@echo "  make simulator-bank     the PSP simulator as a certified partner bank (SIMBANK=plan|apply|rollback)"
+	@echo "  make psp-provision PSP=<yaml>  a partner bank from its filled file (STEP=plan|apply|rollback)"
 	@echo "  make operator EMAIL=… FIRST=… LAST=… [ROLE=Revisores|ADMIN] [SOLANGE=viewer,developer] [GATEWAY=1]"
 	@echo "                          ROLE=ADMIN: the Administradores role (every kuloffice permission)"
 	@echo "                          a staff account; ROLE= (empty) for Solange only"
@@ -273,6 +274,23 @@ cash-deposits:
 gateway-billers:
 	@grep -q '^KULOFFICE_INCOMING_TRANSFERS_ENABLED=true' $(ENV_FILE) || { echo "turn incoming transfers on first (KULOFFICE_INCOMING_TRANSFERS_ENABLED=true): the billers' status comes on its webhook" >&2; exit 1; }
 	@GATEWAY_BILLER_PROVISIONING=1 ENV_FILE=$(ENV_FILE) COMPOSE="docker compose --env-file $(ENV_FILE)" sh scripts/gateway-kuloffice.sh
+
+# Any partner bank from its filled provisioning file (copied from
+# ../bank-deploy/provisioning/*.example.yaml, kept outside git, its evidence
+# files beside it): make psp-provision PSP=~/fnb/fnb-dev.yaml [STEP=plan|apply|rollback].
+# Safe to repeat: it resumes. State, secrets and the readiness report:
+# psp-output/<file name>/ (root-only).
+STEP ?= apply
+psp-provision:
+	@[ -n "$(PSP)" ] && [ -f "$(PSP)" ] || { echo "usage: make psp-provision PSP=<filled yaml> [STEP=plan|apply|rollback]" >&2; exit 2; }
+	@out="psp-output/$$(basename "$(PSP)" .yaml)"; mkdir -p "$$out" && chmod 700 psp-output "$$out"
+	$(COMPOSE) --profile tools run --rm --no-deps -u 0 \
+		-v "$(CURDIR)/../bank-deploy/provisioning:/psp:ro" -v "$$(cd "$$(dirname "$(PSP)")" && pwd):/config:ro" \
+		-v "$(CURDIR)/psp-output/$$(basename "$(PSP)" .yaml):/output" \
+		-e PSP_CONFIG="/config/$$(basename "$(PSP)")" -e PSP_OUTPUT=/output \
+		-e GATEWAY_PUBLIC_INTERNAL_URL=http://gateway:9090 \
+		--entrypoint sh tools -c 'python3 -c "import yaml" 2>/dev/null || python3 -m pip install --quiet --disable-pip-version-check --target /tmp/py pyyaml; PYTHONPATH=/tmp/py exec python3 /psp/psp_provision.py $(STEP)'
+
 
 # The PSP simulator as a partner bank, brought in by the same provisioner as
 # a real bank's pilot (../bank-deploy/provisioning/psp_provision.py with
