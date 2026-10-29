@@ -3,6 +3,8 @@ COMPOSE = docker compose --env-file $(ENV_FILE) -f compose.yaml
 S ?=
 ROLE ?= Revisores
 SOLANGE ?=
+PSP ?= ./fnb-pilot.yaml
+PSP_OUTPUT ?= ./fnb-pilot-output
 
 .PHONY: help setup config pull start stop restart ps logs provision operator qr-provision gateway-provision fnb-pilot-plan fnb-pilot-provision fnb-pilot-rollback health backup
 
@@ -16,9 +18,9 @@ help:
 	@echo "  make operator EMAIL=... FIRST=... LAST=... [ROLE=Revisores|ADMIN]"
 	@echo "  make qr-provision          provision KulOffice in Solange"
 	@echo "  make gateway-provision     provision signed Gateway event delivery"
-	@echo "  make fnb-pilot-plan        validate and show the FNB pilot plan"
-	@echo "  make fnb-pilot-provision   resume FNB pilot provisioning through pilot"
-	@echo "  make fnb-pilot-rollback    suspend FNB pilot without deleting its audit trail"
+	@echo "  make fnb-pilot-plan PSP=/path/fnb-pilot.yaml       validate and show the plan"
+	@echo "  make fnb-pilot-provision PSP=/path/fnb-pilot.yaml  resume through pilot"
+	@echo "  make fnb-pilot-rollback PSP=/path/fnb-pilot.yaml   suspend without deleting audit trail"
 	@echo "  make health                run installation acceptance checks"
 	@echo "  make ps / make logs S=x"
 	@echo "  make restart [S=x]         recreate services and reload environment"
@@ -69,13 +71,13 @@ gateway-provision: config
 	@ENV_FILE=$(ENV_FILE) COMPOSE="$(COMPOSE)" sh scripts/provision-gateway.sh
 
 fnb-pilot-plan: config
-	@ENV_FILE=$(ENV_FILE) sh scripts/provision-psp.sh plan
+	@ENV_FILE=$(ENV_FILE) PSP_CONFIG="$(PSP)" PSP_OUTPUT="$(PSP_OUTPUT)" sh scripts/provision-psp.sh plan
 
 fnb-pilot-provision: config
-	@ENV_FILE=$(ENV_FILE) sh scripts/provision-psp.sh apply
+	@ENV_FILE=$(ENV_FILE) PSP_CONFIG="$(PSP)" PSP_OUTPUT="$(PSP_OUTPUT)" sh scripts/provision-psp.sh apply
 
 fnb-pilot-rollback: config
-	@ENV_FILE=$(ENV_FILE) sh scripts/provision-psp.sh rollback
+	@ENV_FILE=$(ENV_FILE) PSP_CONFIG="$(PSP)" PSP_OUTPUT="$(PSP_OUTPUT)" sh scripts/provision-psp.sh rollback
 
 health:
 	@ENV_FILE=$(ENV_FILE) COMPOSE="$(COMPOSE)" sh scripts/health.sh

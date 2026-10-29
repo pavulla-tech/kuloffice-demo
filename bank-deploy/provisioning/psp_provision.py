@@ -13,6 +13,7 @@ adopts what already exists and continues from the first unmet gate.
 from __future__ import annotations
 
 import argparse
+import ast
 import datetime as dt
 import html
 import http.cookies
@@ -34,12 +35,255 @@ from typing import Any
 
 try:
     import yaml
-except ImportError:  # pragma: no cover - exercised by the provisioner image
+except ImportError:  # The locked bank tools image deliberately has no pip/PyYAML.
     yaml = None
+
+
+GATEWAY_PROFILE_CURRENT = "current"
+GATEWAY_PROFILE_PILOT_2026_10_22 = "pilot-2026-10-22"
+GATEWAY_PROFILES = {GATEWAY_PROFILE_CURRENT, GATEWAY_PROFILE_PILOT_2026_10_22}
+# The locked v0.1.1-alpha14 image was built 38 seconds after this commit. The
+# image was built with -trimpath and no vcs.revision metadata, so the timestamp
+# and ancestry are the strongest provenance available without changing it.
+PILOT_2026_10_22_GATEWAY_REVISION = "15935f3f42545feb3aa5a945062fb99f93f1cc5a"
 
 
 class ProvisionError(RuntimeError):
     pass
+
+
+class _OfflineYAML:
+    """Small, strict YAML subset used by the air-gapped bank tools image.
+
+    It accepts exactly the ordinary mappings, sequences, flow collections and
+    scalar values used by the provisioning schema. It intentionally rejects
+    YAML tags, aliases and block scalars; provisioning files do not need those
+    features, and accepting them would make this security-sensitive fallback
+    much harder to audit. JSON is a valid input as well.
+    """
+
+    @staticmethod
+    def _without_comment(line: str) -> str:
+        quote = ""
+        escaped = False
+        for index, char in enumerate(line):
+            if escaped:
+                escaped = False
+                continue
+            if quote == '"' and char == "\\":
+                escaped = True
+                continue
+            if char in ("'", '"'):
+                if not quote:
+                    quote = char
+                elif quote == char:
+                    quote = ""
+                continue
+            if char == "#" and not quote and (index == 0 or line[index - 1].isspace()):
+                return line[:index]
+        return line
+
+    @staticmethod
+    def _split(value: str, separator: str = ",") -> list[str]:
+        parts: list[str] = []
+        start = 0
+        quote = ""
+        escaped = False
+        depth = 0
+        for index, char in enumerate(value):
+            if escaped:
+                escaped = False
+                continue
+            if quote == '"' and char == "\\":
+                escaped = True
+                continue
+            if char in ("'", '"'):
+                if not quote:
+                    quote = char
+                elif quote == char:
+                    quote = ""
+                continue
+            if quote:
+                continue
+            if char in "[{":
+                depth += 1
+            elif char in "]}":
+                depth -= 1
+            elif char == separator and depth == 0:
+                parts.append(value[start:index].strip())
+                start = index + 1
+        if quote or depth != 0:
+            raise ProvisionError("invalid quoted or flow-style YAML value")
+        parts.append(value[start:].strip())
+        return parts
+
+    @classmethod
+    def _key_value(cls, text: str) -> tuple[str, str] | None:
+        quote = ""
+        escaped = False
+        depth = 0
+        for index, char in enumerate(text):
+            if escaped:
+                escaped = False
+                continue
+            if quote == '"' and char == "\\":
+                escaped = True
+                continue
+            if char in ("'", '"'):
+                if not quote:
+                    quote = char
+                elif quote == char:
+                    quote = ""
+                continue
+            if quote:
+                continue
+            if char in "[{":
+                depth += 1
+            elif char in "]}":
+                depth -= 1
+            elif char == ":" and depth == 0:
+                key = text[:index].strip()
+                if not key:
+                    raise ProvisionError("empty YAML mapping key")
+                return key, text[index + 1:].strip()
+        return None
+
+    @classmethod
+    def _scalar(cls, text: str) -> Any:
+        text = text.strip()
+        if text.startswith("[") and text.endswith("]"):
+            inside = text[1:-1].strip()
+            return [] if not inside else [cls._scalar(item) for item in cls._split(inside)]
+        if text.startswith("{") and text.endswith("}"):
+            inside = text[1:-1].strip()
+            result: dict[str, Any] = {}
+            if not inside:
+                return result
+            for item in cls._split(inside):
+                pair = cls._key_value(item)
+                if pair is None:
+                    raise ProvisionError(f"invalid flow mapping item: {item}")
+                key, raw = pair
+                if key in result:
+                    raise ProvisionError(f"duplicate YAML key: {key}")
+                result[str(cls._scalar(key))] = cls._scalar(raw)
+            return result
+        if len(text) >= 2 and text[0] == text[-1] and text[0] in ("'", '"'):
+            if text[0] == "'":
+                return text[1:-1].replace("''", "'")
+            try:
+                return ast.literal_eval(text)
+            except (SyntaxError, ValueError) as error:
+                raise ProvisionError(f"invalid quoted YAML scalar: {text}") from error
+        lowered = text.lower()
+        if lowered in ("null", "~"):
+            return None
+        if lowered in ("true", "false"):
+            return lowered == "true"
+        if re.fullmatch(r"-?(?:0|[1-9][0-9]*)", text):
+            return int(text)
+        if not text or text[0] in "&*!|>":
+            raise ProvisionError("unsupported empty, tagged, aliased or block YAML scalar")
+        return text
+
+    @classmethod
+    def safe_load(cls, source: Any) -> Any:
+        text = source.read() if hasattr(source, "read") else str(source)
+        stripped = text.lstrip()
+        if stripped.startswith(("{", "[")):
+            try:
+                return json.loads(text)
+            except json.JSONDecodeError:
+                pass
+        lines: list[tuple[int, str, int]] = []
+        for number, raw in enumerate(text.splitlines(), 1):
+            if "\t" in raw[:len(raw) - len(raw.lstrip())]:
+                raise ProvisionError(f"YAML line {number}: indentation must use spaces")
+            clean = cls._without_comment(raw).rstrip()
+            if not clean.strip():
+                continue
+            indent = len(clean) - len(clean.lstrip(" "))
+            content = clean[indent:]
+            if content.startswith(("---", "...")):
+                raise ProvisionError(f"YAML line {number}: multiple documents are not supported")
+            lines.append((indent, content, number))
+        if not lines:
+            return None
+        if lines[0][0] != 0:
+            raise ProvisionError(f"YAML line {lines[0][2]}: top-level content must not be indented")
+
+        def block(index: int, indent: int) -> tuple[Any, int]:
+            is_list = lines[index][1] == "-" or lines[index][1].startswith("- ")
+            result: Any = [] if is_list else {}
+            while index < len(lines):
+                current_indent, content, number = lines[index]
+                if current_indent < indent:
+                    break
+                if current_indent > indent:
+                    raise ProvisionError(f"YAML line {number}: unexpected indentation")
+                list_line = content == "-" or content.startswith("- ")
+                if list_line != is_list:
+                    raise ProvisionError(f"YAML line {number}: cannot mix a sequence and mapping at one level")
+                if is_list:
+                    raw_item = content[1:].strip()
+                    index += 1
+                    if not raw_item:
+                        if index >= len(lines) or lines[index][0] <= indent:
+                            raise ProvisionError(f"YAML line {number}: an empty sequence item needs an indented value")
+                        item, index = block(index, lines[index][0])
+                    else:
+                        pair = cls._key_value(raw_item)
+                        if pair is None:
+                            item = cls._scalar(raw_item)
+                        else:
+                            key, raw_value = pair
+                            item = {}
+                            if raw_value:
+                                item[key] = cls._scalar(raw_value)
+                            elif index < len(lines) and lines[index][0] > indent:
+                                item[key], index = block(index, lines[index][0])
+                            else:
+                                item[key] = None
+                            if index < len(lines) and lines[index][0] > indent:
+                                continuation_indent = lines[index][0]
+                                continuation, index = block(index, continuation_indent)
+                                if not isinstance(continuation, dict):
+                                    raise ProvisionError(f"YAML line {number}: mapping item continuation must be a mapping")
+                                for extra_key, extra_value in continuation.items():
+                                    if extra_key in item:
+                                        raise ProvisionError(f"YAML line {number}: duplicate YAML key: {extra_key}")
+                                    item[extra_key] = extra_value
+                    result.append(item)
+                    continue
+                pair = cls._key_value(content)
+                if pair is None:
+                    raise ProvisionError(f"YAML line {number}: expected key: value")
+                key, raw_value = pair
+                if key in result:
+                    raise ProvisionError(f"YAML line {number}: duplicate YAML key: {key}")
+                index += 1
+                if raw_value:
+                    result[key] = cls._scalar(raw_value)
+                elif index < len(lines) and lines[index][0] > indent:
+                    result[key], index = block(index, lines[index][0])
+                else:
+                    result[key] = None
+            return result, index
+
+        value, consumed = block(0, 0)
+        if consumed != len(lines):
+            raise ProvisionError(f"YAML line {lines[consumed][2]} could not be parsed")
+        return value
+
+    @staticmethod
+    def safe_dump(value: Any) -> str:
+        # JSON is a strict subset of YAML and keeps the fallback testable
+        # without growing a second serializer.
+        return json.dumps(value, indent=2)
+
+
+if yaml is None:
+    yaml = _OfflineYAML
 
 
 def log(message: str) -> None:
@@ -83,8 +327,6 @@ def require(config: dict[str, Any], fields: list[str]) -> None:
 
 
 def load_config(path: Path) -> dict[str, Any]:
-    if yaml is None:
-        raise ProvisionError("PyYAML is not installed in the provisioner image")
     with path.open(encoding="utf-8") as handle:
         value = yaml.safe_load(handle)
     if not isinstance(value, dict):
@@ -114,6 +356,7 @@ def load_config(path: Path) -> dict[str, Any]:
                     target = path.parent / target
                 document[key] = str(target)
     require(value, [
+        "deployment.gateway_profile",
         "operators.maker.email", "operators.maker.first_name", "operators.maker.last_name",
         "operators.checker.email", "operators.checker.first_name", "operators.checker.last_name",
         "operators.partner_technical.email", "operators.partner_technical.first_name", "operators.partner_technical.last_name",
@@ -172,6 +415,15 @@ def load_config(path: Path) -> dict[str, Any]:
     for needed in (("NAME_LOOKUP", "cash_deposit"), ("CASH_IN", "cash_deposit")):
         if needed not in rows:
             raise ProvisionError(f"partner.capability_matrix must enable {needed[0]}/{needed[1]}")
+    profile = str(nested(value, "deployment.gateway_profile", "")).strip()
+    if profile not in GATEWAY_PROFILES:
+        raise ProvisionError("deployment.gateway_profile must be one of " + ", ".join(sorted(GATEWAY_PROFILES)))
+    if profile == GATEWAY_PROFILE_PILOT_2026_10_22:
+        if ("SALE", "bank_transfer") not in rows:
+            raise ProvisionError(
+                "pilot-2026-10-22 requires the declared SALE/bank_transfer row used by alpha14 certification")
+        if nested(value, "simulator", None):
+            raise ProvisionError("pilot-2026-10-22 is the locked bank profile and must not contain a simulator block")
     capabilities = matrix.get("capabilities", []) if isinstance(matrix, dict) else []
     incoming = next((row for row in capabilities if row.get("name") == "account_funding.incoming"), None)
     if not incoming or not {"test", "live"}.issubset(set(incoming.get("modes", []))) or \
@@ -237,6 +489,14 @@ def extract_one_time_key(which: str, page: str) -> str:
 # The launch-matrix routes a partner needs live, unless its YAML lists its own
 # (partner.launch_routes): the FNB pilot's cash deposits.
 DEFAULT_LAUNCH_ROUTES = [{"operation": "cash_deposit", "driver": "partner_api", "method": "cash", "mode": "live", "scope": "acc_top"}]
+
+# Tenant scopes only. In alpha14 (and correctly in later builds),
+# bills:artifacts is platform/operator-only and a partner key cannot grant it
+# to another key. FNB's cash-deposit integration does not need it.
+PARTNER_PILOT_KEY_SCOPES = [
+    "transactions:read", "transactions:write", "bills:read", "events:read",
+    "reconciliation:read", "reconciliation:write",
+]
 
 
 def launch_routes(config: dict[str, Any]) -> list[dict[str, str]]:
@@ -359,9 +619,14 @@ class HTTP:
 class Provisioner:
     def __init__(self, config: dict[str, Any], output: Path, dry_run: bool = False) -> None:
         self.config = config
+        # load_config requires this field for every real run. The fallback is
+        # only for small unit-test fixtures that construct Provisioner directly.
+        self.gateway_profile = str(nested(config, "deployment.gateway_profile", GATEWAY_PROFILE_CURRENT))
         # The partner's short name in reasons, keys and messages ("FNB").
         self.name = str(nested(config, "partner.short_name", "") or nested(config, "partner.legal_name", "")).strip()
         self.output = output
+        self.output.mkdir(parents=True, exist_ok=True, mode=0o700)
+        os.chmod(self.output, 0o700)
         self.dry_run = dry_run
         self.state_path = output / "state.json"
         self.secrets_path = output / "secrets.json"
@@ -972,6 +1237,11 @@ class Provisioner:
         own); a real bank's are printed and written to
         certification-tasks.json, for it to do before their deadline.
         """
+        if self.gateway_profile == GATEWAY_PROFILE_PILOT_2026_10_22:
+            # alpha14 predates GET /v1/certification/tasks. Its suite instead
+            # uses the declared SALE/bank_transfer row and needs no partner act.
+            log("SKIP  alpha14 has no incoming-funding certification tasks; continue with its payment suite")
+            return
         simulator = self.simulator()
         if simulator is not None:
             try:
@@ -1178,10 +1448,7 @@ class Provisioner:
                 days=int(nested(self.config, "pilot.credential_valid_days", 90)))
             _, issued, _ = broad_api.call("POST", "/api-keys", {
                 "name": f"{self.name} controlled cash-deposit pilot", "type": "rk",
-                # bills:artifacts (tokens and PINs in clear) is an operator's
-                # scope: a partner key can't grant it and a counter needs none.
-                "scopes": ["transactions:read", "transactions:write", "bills:read",
-                           "events:read", "reconciliation:read", "reconciliation:write"],
+                "scopes": PARTNER_PILOT_KEY_SCOPES,
                 "expires_at": expires.isoformat().replace("+00:00", "Z"),
             })
             self.secret_values["partner_live_api_key"] = issued["secret"]
@@ -1270,6 +1537,9 @@ class Provisioner:
     def report(self, outcome: str) -> None:
         report = {
             "generated_at": dt.datetime.now(dt.timezone.utc).isoformat(), "outcome": outcome,
+            "gateway_profile": self.gateway_profile,
+            "expected_gateway_revision": (PILOT_2026_10_22_GATEWAY_REVISION
+                                          if self.gateway_profile == GATEWAY_PROFILE_PILOT_2026_10_22 else None),
             "psp_id": self.state.get("psp_id"), "application_id": self.state.get("application_id"),
             "test_business_account_id": self.state.get("test_business_account_id"),
             "statement_profile_id": self.state.get("statement_profile_id"),
@@ -1277,13 +1547,16 @@ class Provisioner:
             "trust_statement_profile_id": self.state.get("trust_statement_profile_id"),
             "safeguarding_accounts": self.state.get("safeguarding_accounts", []),
             "launch_matrix_version": self.state.get("launch_matrix_version"),
-            "live_cash_deposit_route_enabled": self.state.get("live_cash_deposit_route_enabled", False),
+            "launch_routes_enabled": self.state.get("launch_routes_enabled", False),
+            # Retained for older report consumers. All shipped configurations
+            # currently request the controlled live cash-deposit route.
+            "live_cash_deposit_route_enabled": self.state.get(
+                "launch_routes_enabled", self.state.get("live_cash_deposit_route_enabled", False)),
             "certification": self.state.get("certification_run"),
             "test_invoices": self.state.get("test_invoices", {}),
             "partner_live_api_key_id": self.state.get("partner_live_api_key_id"),
             "partner_live_api_key_expires_at": self.state.get("partner_live_api_key_expires_at"),
-            "partner_live_api_key_scopes": ["transactions:read", "transactions:write", "bills:read",
-                                         "events:read", "reconciliation:read", "reconciliation:write"],
+            "partner_live_api_key_scopes": PARTNER_PILOT_KEY_SCOPES,
             "test_webhook_endpoint_id": self.state.get("test_webhook_endpoint_id"),
             "live_webhook_endpoint_id": self.state.get("live_webhook_endpoint_id"),
             "pilot_routing_disabled": self.state.get("pilot_routing_disabled", False),

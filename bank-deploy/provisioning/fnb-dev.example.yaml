@@ -12,6 +12,7 @@
 schema_version: 1
 
 deployment:
+  gateway_profile: current
   country: MZ
   currency: MZN
   language: pt

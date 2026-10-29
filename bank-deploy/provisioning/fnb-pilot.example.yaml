@@ -9,6 +9,9 @@
 schema_version: 1
 
 deployment:
+  # Exact locked bank bundle from 2026-10-22. Never select compatibility by
+  # probing or version guessing: this value is the operator's explicit choice.
+  gateway_profile: pilot-2026-10-22
   country: MZ
   currency: MZN
   language: pt

@@ -289,7 +289,7 @@ psp-provision:
 		-v "$(CURDIR)/psp-output/$$(basename "$(PSP)" .yaml):/output" \
 		-e PSP_CONFIG="/config/$$(basename "$(PSP)")" -e PSP_OUTPUT=/output \
 		-e GATEWAY_PUBLIC_INTERNAL_URL=http://gateway:9090 \
-		--entrypoint sh tools -c 'python3 -c "import yaml" 2>/dev/null || python3 -m pip install --quiet --disable-pip-version-check --target /tmp/py pyyaml; PYTHONPATH=/tmp/py exec python3 /psp/psp_provision.py $(STEP)'
+		--entrypoint python3 tools /psp/psp_provision.py $(STEP)
 
 
 # The PSP simulator as a partner bank, brought in by the same provisioner as
@@ -308,7 +308,7 @@ simulator-bank:
 		-v "$(CURDIR)/../bank-deploy/provisioning:/psp:ro" -v "$(CURDIR)/simulator-bank-output:/output" \
 		-e PSP_CONFIG=/psp/simulator-bank.example.yaml -e PSP_OUTPUT=/output \
 		-e GATEWAY_PUBLIC_INTERNAL_URL=http://gateway:9090 \
-		--entrypoint sh tools -c 'python3 -c "import yaml" 2>/dev/null || python3 -m pip install --quiet --disable-pip-version-check --target /tmp/py pyyaml; PYTHONPATH=/tmp/py exec python3 /psp/psp_provision.py $(SIMBANK)'
+		--entrypoint python3 tools /psp/psp_provision.py $(SIMBANK)
 
 # ROLE=ADMIN: an admin, holding every permission in kuloffice's catalogue.
 ROLE ?= Revisores

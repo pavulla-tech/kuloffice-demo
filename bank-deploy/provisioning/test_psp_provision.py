@@ -30,6 +30,10 @@ class PSPProvisionTests(unittest.TestCase):
         matrix["routes"][0]["enabled"] = False
         self.assertFalse(psp.live_cash_deposit_enabled(matrix))
 
+    def test_partner_pilot_key_has_no_operator_only_artifact_scope(self):
+        self.assertNotIn("bills:artifacts", psp.PARTNER_PILOT_KEY_SCOPES)
+        self.assertEqual(len(psp.PARTNER_PILOT_KEY_SCOPES), len(set(psp.PARTNER_PILOT_KEY_SCOPES)))
+
     def test_percentage_amount_is_decimal_and_fixed_to_two_places(self):
         self.assertEqual(psp.percentage_amount("500000", 10), "50000.00")
         self.assertEqual(psp.percentage_amount("0.15", 10), "0.02")
@@ -93,6 +97,12 @@ class PSPProvisionTests(unittest.TestCase):
             self.assertEqual(json.loads(path.read_text()), {"secret": "value"})
             self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)
 
+    def test_provisioner_makes_the_output_directory_root_only(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "output"
+            psp.Provisioner({"partner": {"legal_name": "FNB"}}, output)
+            self.assertEqual(stat.S_IMODE(output.stat().st_mode), 0o700)
+
     def test_require_lists_all_missing_values(self):
         with self.assertRaisesRegex(psp.ProvisionError, "a, b.c"):
             psp.require({}, ["a", "b.c"])
@@ -106,6 +116,7 @@ class PSPProvisionTests(unittest.TestCase):
                         "confirmation": "polling", "timeout_ms": 10000}
         return {
             "schema_version": 1,
+            "deployment": {"gateway_profile": "current"},
             "operators": {
                 "maker": {"email": "maker@example.com", "first_name": "A", "last_name": "B"},
                 "checker": {"email": "checker@example.com", "first_name": "C", "last_name": "D"},
@@ -146,15 +157,34 @@ class PSPProvisionTests(unittest.TestCase):
         return psp.load_config(path)
 
     def test_a_complete_partner_yaml_loads(self):
-        if psp.yaml is None:
-            self.skipTest("PyYAML is tested in the provisioner image")
         with tempfile.TemporaryDirectory() as directory:
             loaded = self.load(Path(directory), self.valid_config(Path(directory)))
             self.assertEqual(loaded["partner"]["short_name"], "FNB")
 
+    def test_the_offline_yaml_reader_parses_every_shipped_example(self):
+        for name in ("fnb-pilot.example.yaml", "fnb-dev.example.yaml", "simulator-bank.example.yaml"):
+            parsed = psp._OfflineYAML.safe_load(MODULE.with_name(name).read_text())
+            self.assertEqual(parsed["schema_version"], 1, name)
+            self.assertIsInstance(parsed["partner"]["capability_matrix"]["types"], list, name)
+
+    def test_gateway_profile_is_explicit_and_alpha14_requires_its_sale_row(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            config = self.valid_config(root)
+            del config["deployment"]["gateway_profile"]
+            with self.assertRaisesRegex(psp.ProvisionError, "deployment.gateway_profile"):
+                self.load(root, config)
+
+            config["deployment"]["gateway_profile"] = "pilot-2026-10-22"
+            with self.assertRaisesRegex(psp.ProvisionError, "SALE/bank_transfer"):
+                self.load(root, config)
+            sale = dict(config["partner"]["capability_matrix"]["types"][0],
+                        type="SALE", methods=["bank_transfer"])
+            config["partner"]["capability_matrix"]["types"].insert(0, sale)
+            loaded = self.load(root, config)
+            self.assertEqual(loaded["deployment"]["gateway_profile"], "pilot-2026-10-22")
+
     def test_maker_and_checker_must_be_different(self):
-        if psp.yaml is None:
-            self.skipTest("PyYAML is tested in the provisioner image")
         with tempfile.TemporaryDirectory() as directory:
             config = self.valid_config(Path(directory))
             config["operators"]["checker"]["email"] = "maker@example.com"
@@ -325,6 +355,17 @@ class PSPProvisionTests(unittest.TestCase):
                                 for line in lines))
             self.assertFalse(any("incoming/name_lookup" in line for line in lines))
 
+    def test_alpha14_profile_never_calls_the_missing_task_endpoint(self):
+        with tempfile.TemporaryDirectory() as directory:
+            config = {"deployment": {"gateway_profile": "pilot-2026-10-22"},
+                      "partner": {"short_name": "FNB"}}
+            provisioner = psp.Provisioner(config, Path(directory))
+            provisioner.partner_api = lambda _key: self.fail("alpha14 must not call the partner task API")
+            with mock.patch.object(psp, "log") as logged:
+                provisioner.partner_tasks("run-1", "test-key")
+            self.assertTrue(any("alpha14 has no incoming-funding certification tasks" in str(call)
+                                for call in logged.call_args_list))
+
     def test_the_statement_round_lists_the_partner_task_payments(self):
         # The Gateway keeps its wording; an incoming-funding run's payments are
         # its transfers' and deposits' references and amounts.
@@ -480,8 +521,6 @@ class PSPProvisionTests(unittest.TestCase):
             self.assertEqual(calls[6][2]["entry_id"], "CERT-2")
 
     def test_the_simulator_bank_config_loads(self):
-        if psp.yaml is None:
-            self.skipTest("PyYAML is tested in the provisioner image")
         loaded = psp.load_config(MODULE.with_name("simulator-bank.example.yaml"))
         self.assertEqual(loaded["simulator"]["url"], "http://simulator:8085")
         self.assertTrue(Path(loaded["partner"]["kyb"]["documents"][0]["file"]).is_file())
@@ -499,15 +538,12 @@ class PSPProvisionTests(unittest.TestCase):
                          [{"account": "SIMBANK-TRUST-001", "currency": "MZN", "bank": "Banco Simulado KulPay"}])
 
     def test_the_fnb_example_documents_the_new_keys_empty(self):
-        if psp.yaml is None:
-            self.skipTest("PyYAML is tested in the provisioner image")
         raw = psp.yaml.safe_load(MODULE.with_name("fnb-pilot.example.yaml").read_text())
+        self.assertEqual(raw["deployment"]["gateway_profile"], "pilot-2026-10-22")
         self.assertEqual(raw["partner"]["statement_profile"]["additional_profiles"], [])
         self.assertEqual(raw["partner"]["safeguarding_accounts"], [])
 
     def test_additional_profiles_resolve_beside_the_yaml_and_are_checked(self):
-        if psp.yaml is None:
-            self.skipTest("PyYAML is tested in the provisioner image")
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             config = self.valid_config(root)
@@ -610,9 +646,12 @@ class PSPProvisionTests(unittest.TestCase):
             provisioner.ensure_safeguarding_accounts()
             provisioner.ensure_safeguarding_accounts()
             self.assertEqual(registered, [{"account": "SIMBANK-TRUST-001", "currency": "MZN", "bank": "Banco Simulado KulPay"}])
+            provisioner.state["launch_routes_enabled"] = True
             provisioner.report("pilot_ready")
             report = json.loads((Path(directory) / "readiness-report.json").read_text())
             self.assertEqual(report["safeguarding_accounts"], ["SIMBANK-TRUST-001"])
+            self.assertTrue(report["launch_routes_enabled"])
+            self.assertTrue(report["live_cash_deposit_route_enabled"])
 
             # Plan mode only says what it would register.
             planning = psp.Provisioner(provisioner.config, Path(directory) / "plan", dry_run=True)
