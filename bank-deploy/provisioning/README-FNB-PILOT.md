@@ -1,41 +1,53 @@
 # FNB pilot provisioning (bank bundle rev4)
 
 The rev4 provisioning files work with the unchanged 2026-10-22 bank images.
-They do not pull packages or contact the internet.
+They do not pull packages or contact the internet, and they do not need
+`make`: every step below is a plain `docker compose` or `sh` command (the
+Makefile targets of the same names run exactly these).
 
-The installed stack is `/opt/kulpay/kulpay-stack`, with Compose and its
-Makefile in `/opt/kulpay/kulpay-stack/deployment`.
+The installed stack is `/opt/kulpay/kulpay-stack`, with Compose in
+`/opt/kulpay/kulpay-stack/deployment`. Run every command from there:
 
-1. As the account that operates the stack, create protected input and output
-   directories outside the deployment tree:
+    cd /opt/kulpay/kulpay-stack/deployment
+
+1. Back up, install the update and reload the Gateway (the update adds a
+   launch matrix that enables live cash deposits through partner banks):
+
+       sudo env COMPOSE="docker compose --env-file .env -f compose.yaml -f compose.miniailive.yaml" sh scripts/backup.sh
+       sudo cp Makefile Makefile.rev3 && sudo cp compose.yaml compose.yaml.rev3
+       sudo unzip -o /path/to/kulpay-bank-pilot-2026.10.22-rev4-update.zip -d /opt/kulpay/kulpay-stack
+       sudo env ENV_FILE=.env sh scripts/check-config.sh
+       sudo docker compose --env-file .env -f compose.yaml -f compose.miniailive.yaml config --quiet
+       sudo docker compose --env-file .env -f compose.yaml -f compose.miniailive.yaml up -d --force-recreate gateway-config gateway
+       sudo env COMPOSE="docker compose --env-file .env -f compose.yaml -f compose.miniailive.yaml" sh scripts/health.sh
+
+2. Create protected input and output directories outside the deployment
+   tree, and install the template there. Keep all KYB, contract and
+   statement evidence in the same input directory:
 
        sudo install -d -m 0700 /opt/kulpay/kulpay-stack/fnb-pilot/input
        sudo install -d -m 0700 /opt/kulpay/kulpay-stack/fnb-pilot/output
-
-   From the deployment directory, install the template and keep all KYB,
-   contract and statement evidence in the same input directory:
-
        sudo install -m 0600 provisioning/fnb-pilot.example.yaml \
          /opt/kulpay/kulpay-stack/fnb-pilot/input/fnb-pilot.yaml
-2. Fill every value marked `REQUIRED`. Do not change
+
+3. Fill every value marked `REQUIRED`. Do not change
    `deployment.gateway_profile: pilot-2026-10-22` and do not remove the
    documented `SALE/bank_transfer` compatibility row.
-3. Keep credentials in the deployment `.env`, never in the YAML. Maker and
+4. Keep credentials in the deployment `.env`, never in the YAML. Maker and
    checker must be different people and their Gateway keys must be different.
-4. From `/opt/kulpay/kulpay-stack/deployment`, run:
+5. Check (changes nothing), then provision (resumable: run it again at any
+   time and it continues where it stopped):
 
-       sudo make fnb-pilot-plan \
-         PSP=/opt/kulpay/kulpay-stack/fnb-pilot/input/fnb-pilot.yaml \
-         PSP_OUTPUT=/opt/kulpay/kulpay-stack/fnb-pilot/output
+       sudo env PSP_CONFIG=/opt/kulpay/kulpay-stack/fnb-pilot/input/fnb-pilot.yaml \
+         PSP_OUTPUT=/opt/kulpay/kulpay-stack/fnb-pilot/output sh scripts/provision-psp.sh plan
 
-       sudo make fnb-pilot-provision \
-         PSP=/opt/kulpay/kulpay-stack/fnb-pilot/input/fnb-pilot.yaml \
-         PSP_OUTPUT=/opt/kulpay/kulpay-stack/fnb-pilot/output
+       sudo env PSP_CONFIG=/opt/kulpay/kulpay-stack/fnb-pilot/input/fnb-pilot.yaml \
+         PSP_OUTPUT=/opt/kulpay/kulpay-stack/fnb-pilot/output sh scripts/provision-psp.sh apply
 
-5. The first apply can stop at `waiting_for_certification`. Give FNB the
+6. The first apply can stop at `waiting_for_certification`. Give FNB the
    protected output directory's `statement-request.json`; place the returned
    CSV beside the YAML, set `partner.certification_statement_file`, and rerun
-   the provision command.
+   the apply command.
 
 The YAML and evidence are mounted read-only. State, reports, one-time keys,
 webhook secrets and temporary passwords are written only below
@@ -44,9 +56,8 @@ files use `0600`. The provisioner never prints secret values.
 
 To stop a controlled pilot without deleting its audit trail:
 
-    sudo make fnb-pilot-rollback \
-      PSP=/opt/kulpay/kulpay-stack/fnb-pilot/input/fnb-pilot.yaml \
-      PSP_OUTPUT=/opt/kulpay/kulpay-stack/fnb-pilot/output
+    sudo env PSP_CONFIG=/opt/kulpay/kulpay-stack/fnb-pilot/input/fnb-pilot.yaml \
+      PSP_OUTPUT=/opt/kulpay/kulpay-stack/fnb-pilot/output sh scripts/provision-psp.sh rollback
 
 See `provisioning/PILOT-2026-10-22-COMPATIBILITY.md` for the locked image source
 pin, endpoint audit and known image limitations.
