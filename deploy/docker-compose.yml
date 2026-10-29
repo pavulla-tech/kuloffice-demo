@@ -302,6 +302,11 @@ services:
       # OAuth redirects are built on it. Payments' own callback URLs come from
       # the caller (KulOffice), so containers still reach gateway:9090.
       KULPAY_EXTERNAL_URL: ${GATEWAY_PUBLIC_URL:-https://gateway.kulpay.pavulla.com}
+      # The public address the Gateway writes into what people open: invoices'
+      # payment links (/pay/invoice/…) and partners' portal invitations.
+      # Unset, it answers with a bare path and KulOffice prefixes its internal
+      # gateway:9090, which no phone can reach.
+      KULPAY_LINKS_GATEWAY_URL: ${GATEWAY_PUBLIC_URL:-https://gateway.kulpay.pavulla.com}
       # PSP onboarding confirmations and partner-portal sign-in links are sent
       # from the Gateway notification outbox. Use a STARTTLS relay (normally
       # port 587); secrets live only in deploy/.env.
