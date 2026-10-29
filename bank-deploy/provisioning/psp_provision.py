@@ -1109,7 +1109,9 @@ class Provisioner:
                 days=int(nested(self.config, "pilot.credential_valid_days", 90)))
             _, issued, _ = broad_api.call("POST", "/api-keys", {
                 "name": f"{self.name} controlled cash-deposit pilot", "type": "rk",
-                "scopes": ["transactions:read", "transactions:write", "bills:read", "bills:artifacts",
+                # bills:artifacts (tokens and PINs in clear) is an operator's
+                # scope: a partner key can't grant it and a counter needs none.
+                "scopes": ["transactions:read", "transactions:write", "bills:read",
                            "events:read", "reconciliation:read", "reconciliation:write"],
                 "expires_at": expires.isoformat().replace("+00:00", "Z"),
             })
@@ -1212,8 +1214,7 @@ class Provisioner:
             "partner_live_api_key_id": self.state.get("partner_live_api_key_id"),
             "partner_live_api_key_expires_at": self.state.get("partner_live_api_key_expires_at"),
             "partner_live_api_key_scopes": ["transactions:read", "transactions:write", "bills:read",
-                                         "bills:artifacts", "events:read", "reconciliation:read",
-                                         "reconciliation:write"],
+                                         "events:read", "reconciliation:read", "reconciliation:write"],
             "test_webhook_endpoint_id": self.state.get("test_webhook_endpoint_id"),
             "live_webhook_endpoint_id": self.state.get("live_webhook_endpoint_id"),
             "pilot_routing_disabled": self.state.get("pilot_routing_disabled", False),
