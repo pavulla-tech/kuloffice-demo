@@ -967,6 +967,12 @@ class Provisioner:
                 log(f"      {result.get('key')}: {result.get('outcome')}"
                     + (f" ({result['reason']})" if result.get("reason") else "")
                     + (f" HTTP {statuses}" if statuses else ""))
+                if result.get("outcome") == "failed" and result.get("calls"):
+                    # The refusing call's own answer: why the Gateway said no.
+                    last = result["calls"][-1]
+                    answer = last.get("answer") or last.get("error") or ""
+                    log(f"        {last.get('method', '')} {last.get('path', '')}: "
+                        + (answer if isinstance(answer, str) else json.dumps(answer))[:500])
             return
         try:
             _, tasks, _ = self.partner_api(sandbox_key).call("GET", "/certification/tasks")
