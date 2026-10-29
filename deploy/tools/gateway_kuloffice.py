@@ -252,6 +252,12 @@ def ensure_kuloffice_biller():
         biller = biller or {}
         products = []
         done.append("created")
+    if not biller.get("tenant_id") and biller.get("code"):
+        # Made by hand without its organisation (the dashboard's form allows
+        # it): KulOffice's code, so it is claimed for KulOffice's account.
+        _, biller = request("PATCH", f"/admin/billers/{code}", ADMIN_KEY, {"tenant_id": ACCOUNT_ID})
+        biller = biller or {}
+        done.append("claimed for KulOffice's account")
     if biller.get("tenant_id") != ACCOUNT_ID:
         raise RuntimeError(
             f"Gateway biller {code} belongs to another account ({biller.get('tenant_id') or 'none'}); "

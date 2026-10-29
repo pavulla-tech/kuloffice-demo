@@ -55,6 +55,9 @@ class FakeGateway:
             return 201, body
         if method == "PUT" and path == "/admin/accounts/acc_kuloffice/cash-in-incoming":
             return 200, {"enabled": True}
+        if method == "PATCH" and path == "/admin/billers/KULPAY":
+            self.biller = {**self.biller, **body}
+            return 200, self.biller
         if method == "POST" and path == "/admin/billers":
             self.biller = {**body, "id": "bil_new", "status": "draft"}
             return 201, self.biller
@@ -277,6 +280,13 @@ class KulOfficeBillerTest(unittest.TestCase):
         summary, _ = self.ensure(fake)
         self.assertEqual(summary, "already active")
         self.assertEqual([c[:2] for c in fake.calls], [("GET", "/admin/billers/KULPAY")])
+
+    def test_a_biller_made_by_hand_without_its_organisation_is_claimed(self):
+        fake = FakeGateway(biller={"id": "bil_1", "code": "KULPAY", "status": "active"})
+        summary, _ = self.ensure(fake)
+        self.assertEqual(summary, "claimed for KulOffice's account")
+        patch = next(c for c in fake.calls if c[0] == "PATCH")
+        self.assertEqual((patch[1], patch[2], patch[3]), ("/admin/billers/KULPAY", "admin-key", {"tenant_id": "acc_kuloffice"}))
 
     def test_a_biller_of_another_tenant_fails_without_changes(self):
         fake = FakeGateway(biller={**ACTIVE_BILLER, "tenant_id": "acc_someone_else", "status": "draft"})
