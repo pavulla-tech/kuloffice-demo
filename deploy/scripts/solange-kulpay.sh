@@ -36,7 +36,7 @@ fi
 if [ -n "${KULOFFICE_SOLANGE_API_KEY:-}" ]; then
   echo "kuloffice's key: already in $env_file (clear it to issue another)"
 else
-  key=$(sol key create -app kulpay-app -mode "$mode" -name kuloffice -scopes codes:read,codes:write,scans:read | tail -1)
+  key=$(sol key create -app kulpay-app -mode "$mode" -name kuloffice -scopes codes:read,codes:write,scans:read,templates:read,logos:write | tail -1)
   case $key in sl_*) ;; *) echo "no key in Solange's answer" >&2; exit 1 ;; esac
   set_env KULOFFICE_SOLANGE_API_KEY "$key"
   echo "kuloffice's key: issued ($mode), written to $env_file"
