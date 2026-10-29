@@ -898,6 +898,15 @@ class Provisioner:
         self.state[f"{mode}_webhook_endpoint_id"] = created.get("id")
         self.save()
 
+    def stand_in(self) -> "HTTP | None":
+        """Dev only: the simulator standing in for a partner that is not doing
+        its certification itself (dev_stand_in.simulator_url): its webhook
+        endpoint checks the run's signatures and it renders the statement; the
+        provisioner does the partner's tasks with the sandbox key. Unlike the
+        simulator bank, it never receives the partner's keys."""
+        url = str(nested(self.config, "dev_stand_in.simulator_url", "") or "").strip()
+        return HTTP(url) if url else None
+
     def simulator(self) -> "HTTP | None":
         """The PSP simulator when it plays the partner bank (dev only)."""
         url = str(nested(self.config, "simulator.url", "") or "").strip()
@@ -928,7 +937,7 @@ class Provisioner:
         partner.certification_statement_file for the next apply.
         """
         path = self.output / "certification-statement.csv"
-        simulator = self.simulator()
+        simulator = self.simulator() or self.stand_in()
         if simulator is not None:
             _, csv_text, _ = simulator.call("POST", "/api/partner/certification-statement", {"payments": payments})
             path.write_text(csv_text if isinstance(csv_text, str) else str(csv_text))
@@ -983,6 +992,9 @@ class Provisioner:
                     log(f"        {last.get('method', '')} {last.get('path', '')}: "
                         + (answer if isinstance(answer, str) else json.dumps(answer))[:500])
             return
+        if self.stand_in() is not None:
+            self.do_partner_tasks(sandbox_key)
+            return
         try:
             _, tasks, _ = self.partner_api(sandbox_key).call("GET", "/certification/tasks")
         except ProvisionError as error:
@@ -1002,6 +1014,51 @@ class Provisioner:
                 + (f", {amount} {task.get('currency', '')}" if amount != "" else "")
                 + (f", reference {task['partner_reference']}" if task.get("partner_reference") else "")
                 + (f", via {task['method']}" if task.get("method") else ""))
+
+    def do_partner_tasks(self, sandbox_key: str) -> None:
+        """Dev stand-in: the partner's sandbox tasks, done here with its key as
+        a counter would (the simulator bank does the same for itself)."""
+        api = self.partner_api(sandbox_key)
+        try:
+            _, tasks, _ = api.call("GET", "/certification/tasks")
+        except ProvisionError as error:
+            if "HTTP 404" not in str(error):
+                log(f"WARN  the certification tasks could not be read: {error}")
+            return
+        account = str(nested(self.config, "partner.commercial_terms.settlement.account", "") or "")
+        attempt = secrets.token_hex(4)
+        for task in tasks.get("tasks", []) if isinstance(tasks, dict) else []:
+            if task.get("done"):
+                continue
+            destination = task.get("destination") or {}
+            ref, currency = task.get("partner_reference", ""), task.get("currency", "")
+            amount = task.get("amount") or f"{int(task.get('amount_minor', 0)) / 100:.2f}"
+            lookup_body = {"method": "cash_deposit", "reference": destination.get("value", "")}
+            try:
+                if task.get("action") == "name_lookup":
+                    api.call("POST", "/name-lookups", lookup_body, headers={"Idempotency-Key": f"standin-{task['key']}-{attempt}"})
+                elif task.get("action") in ("incoming_transfer", "transfer_replay"):  # the replay: the same report again
+                    api.call("POST", "/incoming-transfers", {
+                        "partner_reference": ref, "amount_minor": task.get("amount_minor"), "currency": currency,
+                        "destination": {"type": destination.get("type", ""), "value": destination.get("value", "")},
+                        "final": True})
+                elif task.get("action") == "cash_deposit":
+                    _, found, _ = api.call("POST", "/name-lookups", lookup_body,
+                                           headers={"Idempotency-Key": f"standin-{task['key']}-lookup-{attempt}"})
+                    lookup_id = found["lookup_id"]
+                    _, intent, _ = api.call("POST", "/cash-deposits/intents", {
+                        "lookup_id": lookup_id, "amount": amount, "currency": currency, "partner_reference": ref},
+                        headers={"Idempotency-Key": f"{ref}-{lookup_id}"})
+                    intent_id = intent.get("id") or next((v["id"] for v in intent.values() if isinstance(v, dict) and v.get("id")), "")
+                    api.call("POST", f"/cash-deposits/intents/{intent_id}/confirm", {
+                        "account": account, "entry_id": ref, "value_date": dt.date.today().isoformat()},
+                        headers={"Idempotency-Key": f"{ref}-{lookup_id}-confirm"})
+                else:
+                    log(f"      {task.get('key')}: unknown action {task.get('action')!r}, left to {self.name}")
+                    continue
+                log(f"      {task.get('key')}: done for {self.name} (dev stand-in)")
+            except (ProvisionError, KeyError, TypeError) as error:
+                log(f"      {task.get('key')}: failed: {error}")
 
     def start_and_wait(self, sandbox_key: str, rerun_of: str = "", statement: Path | None = None) -> dict[str, Any]:
         run = self.start_run(rerun_of=rerun_of, statement=statement)
@@ -1247,6 +1304,10 @@ class Provisioner:
         self.ensure_statement_profile(sandbox_key)
         self.ensure_webhook_endpoint("test", sandbox_key)
         self.hand_to_simulator("test", sandbox_key)
+        stand_in = self.stand_in()
+        if stand_in is not None and self.secret_values.get("test_webhook_secret"):
+            # Only the webhook secret: the certification's webhooks to it verify.
+            stand_in.call("PUT", "/api/partner/setup", {"webhook_secret": self.secret_values["test_webhook_secret"]})
         return sandbox_key
 
     def apply(self) -> int:

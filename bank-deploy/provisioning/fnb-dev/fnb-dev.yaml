@@ -1,12 +1,13 @@
 # FNB on dev, with placeholder details (nothing here is real or secret).
 #
-# FNB only needs a bearer token to integrate against dev: stop_at: sandbox
-# provisions FNB up to its sandbox technical setup and keeps its sandbox key
-# (secrets.json, sandbox_api_key). FNB then integrates in test mode and does
-# the certification tasks itself with that key (GET /v1/certification/tasks);
-# with its test webhook URL filled and stop_at: pilot, apply goes on to
-# certification and the pilot (a restricted live key). The bank pilot uses
-# fnb-pilot.example.yaml with real people and documents instead.
+# FNB only needs a live (pilot) key to integrate against dev, so FNB is not
+# asked to certify itself here: dev_stand_in has the provisioner do FNB's
+# sandbox certification tasks with FNB's sandbox key, and the simulator check
+# the run's webhook signatures and render its statement (it never gets FNB's
+# keys). Apply then takes FNB into the pilot and keeps its restricted live
+# key (secrets.json, partner_live_api_key). The bank pilot uses
+# fnb-pilot.example.yaml with real people and documents, and no stand-in.
+# stop_at: sandbox would stop at the sandbox key instead.
 #
 #   cd deploy && make psp-provision PSP=../bank-deploy/provisioning/fnb-dev/fnb-dev.yaml
 
@@ -16,8 +17,12 @@ deployment:
   country: MZ
   currency: MZN
   language: pt
-  stop_at: sandbox
+  stop_at: pilot
   output_directory: /output
+
+# Dev only: see above.
+dev_stand_in:
+  simulator_url: http://simulator:8085
 
 operators:
   # Dev already has its operators; the Gateway admin and checker keys act.
@@ -54,10 +59,10 @@ partner:
   expected_monthly_value: "10000000"
   risk_tier: medium
 
-  # FNB's endpoints, when FNB gives them: test_url is needed for
-  # certification (its webhook cases), live_url for the pilot.
+  # test_url receives the certification's webhooks: the simulator's endpoint
+  # while it stands in. live_url is FNB's own, when FNB gives one.
   webhooks:
-    test_url: ""
+    test_url: http://simulator:8085/partner-webhooks
     live_url: ""
 
   kyb:

@@ -415,11 +415,13 @@ class PSPProvisionTests(unittest.TestCase):
             self.assertIn(("POST", "/webhook-endpoints/we_9/roll-secret"), calls)
             self.assertEqual(json.loads((Path(directory) / "secrets.json").read_text())["live_webhook_secret"], "whsec_new")
 
-    def test_the_fnb_dev_config_loads_and_stops_at_the_sandbox(self):
+    def test_the_fnb_dev_config_loads_with_the_stand_in(self):
         if psp.yaml is None:
             self.skipTest("PyYAML is tested in the provisioner image")
         loaded = psp.load_config(MODULE.with_name("fnb-dev") / "fnb-dev.yaml")
-        self.assertEqual(loaded["deployment"]["stop_at"], "sandbox")
+        self.assertEqual(loaded["deployment"]["stop_at"], "pilot")
+        self.assertEqual(loaded["dev_stand_in"]["simulator_url"], "http://simulator:8085")
+        self.assertNotIn("simulator", loaded, "the simulator must never receive FNB's keys")
         self.assertTrue(Path(loaded["partner"]["statement_profile"]["sample_file"]).is_file())
         self.assertTrue(Path(loaded["partner"]["commercial_terms"]["signed_contract_file"]).is_file())
         self.assertEqual([t["type"] for t in loaded["partner"]["capability_matrix"]["types"]], ["NAME_LOOKUP", "CASH_IN"])
@@ -438,6 +440,44 @@ class PSPProvisionTests(unittest.TestCase):
             self.assertNotIn("ensure_certification", done)
             self.assertNotIn("ensure_pilot", done)
             self.assertEqual(json.loads(provisioner.report_path.read_text())["outcome"], "sandbox_ready")
+
+    def test_the_dev_stand_in_does_the_partners_tasks_with_its_sandbox_key(self):
+        with tempfile.TemporaryDirectory() as directory:
+            provisioner = psp.Provisioner({"partner": {"short_name": "FNB", "commercial_terms": {"settlement": {"account": "FNB-DEV-0001"}}},
+                                           "dev_stand_in": {"simulator_url": "http://simulator:8085"}}, Path(directory))
+            calls: list = []
+            tasks = [
+                {"key": "incoming/name_lookup", "action": "name_lookup", "destination": {"type": "deposit_reference", "value": "KPCERT-X"}},
+                {"key": "incoming/transfer", "action": "incoming_transfer", "partner_reference": "CERT-1", "amount_minor": 1234,
+                 "currency": "MZN", "destination": {"type": "deposit_reference", "value": "KPCERT-X"}},
+                {"key": "incoming/transfer_replay", "action": "transfer_replay", "partner_reference": "CERT-1", "amount_minor": 1234,
+                 "currency": "MZN", "destination": {"type": "deposit_reference", "value": "KPCERT-X"}},
+                {"key": "incoming/cash_deposit", "action": "cash_deposit", "partner_reference": "CERT-2", "amount": "12.34",
+                 "currency": "MZN", "destination": {"type": "deposit_reference", "value": "KPCERT-X"}},
+                {"key": "incoming/done", "action": "name_lookup", "done": True},
+            ]
+
+            class API:
+                def call(self, method, path, body=None, headers=None, **_kwargs):
+                    calls.append((method, path, body, (headers or {}).get("Idempotency-Key")))
+                    if path == "/certification/tasks":
+                        return 200, {"tasks": tasks}, {}
+                    if path == "/name-lookups":
+                        return 200, {"lookup_id": "lk_1"}, {}
+                    if path == "/cash-deposits/intents":
+                        return 201, {"id": "cdi_1"}, {}
+                    return 200, {}, {}
+
+            provisioner.partner_api = lambda key: API()
+            provisioner.partner_tasks("run_1", "kp_test_sk_x")
+            paths = [(c[0], c[1]) for c in calls]
+            self.assertEqual(paths, [("GET", "/certification/tasks"), ("POST", "/name-lookups"), ("POST", "/incoming-transfers"),
+                                     ("POST", "/incoming-transfers"), ("POST", "/name-lookups"), ("POST", "/cash-deposits/intents"),
+                                     ("POST", "/cash-deposits/intents/cdi_1/confirm")])
+            self.assertEqual(calls[2][2], calls[3][2], "the replay is the same report")
+            self.assertEqual(calls[5][3], "CERT-2-lk_1")
+            self.assertEqual(calls[6][2]["account"], "FNB-DEV-0001")
+            self.assertEqual(calls[6][2]["entry_id"], "CERT-2")
 
     def test_the_simulator_bank_config_loads(self):
         if psp.yaml is None:
