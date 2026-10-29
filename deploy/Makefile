@@ -331,7 +331,7 @@ gateway-signin:
 # step only if missing; the secrets go straight into .env, then kuloffice is
 # recreated to read them.
 solange-kulpay:
-	@ENV_FILE=$(ENV_FILE) COMPOSE="$(COMPOSE)" sh scripts/solange-kulpay.sh
+	@ENV_FILE=$(ENV_FILE) COMPOSE="docker compose --env-file $(ENV_FILE)" sh scripts/solange-kulpay.sh
 
 # ── releases (server) ─────────────────────────────────────────────────────────
 #
