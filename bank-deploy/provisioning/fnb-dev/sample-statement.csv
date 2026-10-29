@@ -1,0 +1,3 @@
+line_id,account,value_date,booking_date,amount,currency,direction,provider_reference,kulpay_reference,end_to_end_id,counterparty,depositor_reference,fee
+FNB-DEV-STMT-0001,FNB-DEV-0001,2026-10-28,2026-10-28,1000.00,MZN,credit,FNBDEP-0001,,,Depositante de teste,AG-0000001,0.00
+FNB-DEV-STMT-0002,FNB-DEV-0001,2026-10-28,2026-10-28,250.50,MZN,credit,FNBDEP-0002,,,Depositante de teste,OR-0000002,0.00

@@ -1,0 +1,199 @@
+# FNB on dev, with placeholder details (nothing here is real or secret).
+#
+# FNB only needs a bearer token to integrate against dev: stop_at: sandbox
+# provisions FNB up to its sandbox technical setup and keeps its sandbox key
+# (secrets.json, sandbox_api_key). FNB then integrates in test mode and does
+# the certification tasks itself with that key (GET /v1/certification/tasks);
+# with its test webhook URL filled and stop_at: pilot, apply goes on to
+# certification and the pilot (a restricted live key). The bank pilot uses
+# fnb-pilot.example.yaml with real people and documents instead.
+#
+#   cd deploy && make psp-provision PSP=../bank-deploy/provisioning/fnb-dev/fnb-dev.yaml
+
+schema_version: 1
+
+deployment:
+  country: MZ
+  currency: MZN
+  language: pt
+  stop_at: sandbox
+  output_directory: /output
+
+operators:
+  # Dev already has its operators; the Gateway admin and checker keys act.
+  create_workforce_users: false
+  maker:
+    email: fnb-dev-maker@kulpay.dev
+    first_name: FNB
+    last_name: Maker
+  checker:
+    email: fnb-dev-checker@kulpay.dev
+    first_name: FNB
+    last_name: Checker
+  partner_technical:
+    email: fnb-dev@kulpay.dev
+    first_name: FNB
+    last_name: Dev
+
+partner:
+  short_name: FNB
+  legal_name: FNB Moçambique (desenvolvimento)
+  registration_number: FNB-DEV-000001
+  partner_type: bank
+  licence:
+    type: bank
+    number: FNB-DEV-LIC-0001
+    issuer: Banco de Moçambique (placeholder)
+  technical_contact:
+    name: FNB Dev
+    email: fnb-dev@kulpay.dev
+  compliance_contact:
+    name: FNB Dev
+    email: fnb-dev@kulpay.dev
+  expected_monthly_volume: 1000
+  expected_monthly_value: "10000000"
+  risk_tier: medium
+
+  # FNB's endpoints, when FNB gives them: test_url is needed for
+  # certification (its webhook cases), live_url for the pilot.
+  webhooks:
+    test_url: ""
+    live_url: ""
+
+  kyb:
+    documents:
+      - {type: licence, file: placeholder.pdf}
+      - {type: registration_certificate, file: placeholder.pdf}
+      - {type: articles, file: placeholder.pdf}
+      - {type: ubo_declaration, file: placeholder.pdf}
+      - {type: director_ids, file: placeholder.pdf}
+      - {type: aml_policy, file: placeholder.pdf}
+      - {type: financial_statements, file: placeholder.pdf}
+    screenings:
+      sanctions: {subject: FNB Moçambique, reference: placeholder, notes: development only}
+      pep: {subject: FNB Moçambique, reference: placeholder, notes: development only}
+
+  commercial_terms:
+    contract_ref: FNB-DEV-CONTRACT-0001
+    signed_contract_file: placeholder.pdf
+    funds_flow: direct
+    fee_schedule:
+      - {method: cash_deposit, percent: "0", fixed: "0", currency: MZN}
+    settlement:
+      frequency_days: 1
+      currency: MZN
+      account: FNB-DEV-0001
+    limits:
+      per_transaction: "500000"
+      daily: "20000000"
+      monthly: "400000000"
+      currency: MZN
+
+  capability_matrix:
+    types:
+      - type: NAME_LOOKUP
+        methods: [cash_deposit]
+        direction: inbound
+        mode: sync
+        currencies: [MZN]
+        countries: [MZ]
+        partial: false
+        three_ds: false
+        idempotency: true
+        confirmation: polling
+        timeout_ms: 10000
+      - type: CASH_IN
+        methods: [cash_deposit]
+        direction: inbound
+        mode: sync
+        currencies: [MZN]
+        countries: [MZ]
+        partial: false
+        three_ds: false
+        idempotency: true
+        confirmation: polling
+        timeout_ms: 10000
+    capabilities:
+      - name: account_funding.incoming
+        modes: [test, live]
+        currencies: [MZN]
+        max_amount_minor: 100000000
+
+  statement_profile:
+    sample_file: sample-statement.csv
+    profile:
+      id: fnb-dev-cash-deposits
+      standard: csv
+      direction: push
+      channel: api_upload
+      frequency: daily
+      cutoff: "23:00"
+      timezone: Africa/Maputo
+      arrival_window: 2h
+      granularity: transaction
+      security:
+        checksum: sha256
+      acknowledgement: api
+      currency: MZN
+      date_format: YYYY-MM-DD
+      accounts: [FNB-DEV-0001]
+      mapping:
+        line_id: line_id
+        account: account
+        value_date: value_date
+        booking_date: booking_date
+        amount: amount
+        currency: currency
+        direction: direction
+        psp_reference: provider_reference
+        kulpay_reference: kulpay_reference
+        end_to_end_id: end_to_end_id
+        counterparty: counterparty
+        depositor_ref: depositor_reference
+        fee: fee
+
+  launch_routes:
+    - {operation: cash_deposit, driver: partner_api, method: cash, mode: live, scope: acc_top}
+
+pilot:
+  routing_weight: 10
+  limit_percentage: 10
+  credential_valid_days: 90
+  reason: FNB cash-deposit pilot (development)
+  rollback_reason: Suspend the FNB development pilot
+
+test_business:
+  business_name: FNB Dev Test Business
+  country: MZ
+  biller:
+    code: FNBDEV
+    name: FNB Dev Test Biller
+    category: education
+    support_email: fnb-dev@kulpay.dev
+    presentment_modes: [push]
+    invoice_expiry_days: 30
+  product:
+    code: POSTPAID
+    name: FNB dev postpaid invoice
+    shape: postpaid
+    currency: MZN
+    amount_rule: presented
+    reference_label: Customer account
+    reference_pattern: '^[A-Z0-9-]{3,40}$'
+    reference_example: FNB-DEV-001
+    lookup_required: true
+    routable: true
+    model: agent
+    fee_bearer: biller
+    enabled: true
+  invoices:
+    rf:
+      number: FNB-DEV-RF-001
+      account_reference: FNB-DEV-RF
+      amount: "100.00"
+      description: FNB dev invoice paid with RF reference
+    qr:
+      number: FNB-DEV-QR-001
+      account_reference: FNB-DEV-QR
+      amount: "125.00"
+      description: FNB dev invoice paid from QR

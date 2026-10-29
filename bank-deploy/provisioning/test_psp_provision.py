@@ -415,6 +415,30 @@ class PSPProvisionTests(unittest.TestCase):
             self.assertIn(("POST", "/webhook-endpoints/we_9/roll-secret"), calls)
             self.assertEqual(json.loads((Path(directory) / "secrets.json").read_text())["live_webhook_secret"], "whsec_new")
 
+    def test_the_fnb_dev_config_loads_and_stops_at_the_sandbox(self):
+        if psp.yaml is None:
+            self.skipTest("PyYAML is tested in the provisioner image")
+        loaded = psp.load_config(MODULE.with_name("fnb-dev") / "fnb-dev.yaml")
+        self.assertEqual(loaded["deployment"]["stop_at"], "sandbox")
+        self.assertTrue(Path(loaded["partner"]["statement_profile"]["sample_file"]).is_file())
+        self.assertTrue(Path(loaded["partner"]["commercial_terms"]["signed_contract_file"]).is_file())
+        self.assertEqual([t["type"] for t in loaded["partner"]["capability_matrix"]["types"]], ["NAME_LOOKUP", "CASH_IN"])
+
+    def test_stop_at_sandbox_keeps_the_sandbox_key_and_skips_certification(self):
+        with tempfile.TemporaryDirectory() as directory:
+            provisioner = psp.Provisioner({"deployment": {"stop_at": "sandbox"}, "partner": {"short_name": "FNB"}}, Path(directory))
+            done: list = []
+            for name in ("require_runtime", "verify_launch_matrix", "ensure_users", "ensure_test_business",
+                         "ensure_application", "ensure_kyb", "ensure_commercial", "ensure_capabilities",
+                         "ensure_safeguarding_accounts", "ensure_certification", "ensure_pilot"):
+                setattr(provisioner, name, lambda name=name: done.append(name) or True)
+            provisioner.ensure_sandbox = lambda: done.append("ensure_sandbox") or "kp_test_x"
+            self.assertEqual(provisioner.apply(), 0)
+            self.assertIn("ensure_sandbox", done)
+            self.assertNotIn("ensure_certification", done)
+            self.assertNotIn("ensure_pilot", done)
+            self.assertEqual(json.loads(provisioner.report_path.read_text())["outcome"], "sandbox_ready")
+
     def test_the_simulator_bank_config_loads(self):
         if psp.yaml is None:
             self.skipTest("PyYAML is tested in the provisioner image")

@@ -1045,12 +1045,7 @@ class Provisioner:
                 except ProvisionError as error:
                     log(f"WARN  {self.name}'s statement profiles were not brought up to date: {error}")
             return True
-        if psp.get("status") == "commercial_setup":
-            self.transition("technical_setup", f"Open {self.name} sandbox technical setup")
-        sandbox_key = self.reveal_onboarding_key("sandbox")
-        self.ensure_statement_profile(sandbox_key)
-        self.ensure_webhook_endpoint("test", sandbox_key)
-        self.hand_to_simulator("test", sandbox_key)
+        sandbox_key = self.ensure_sandbox()
         psp = self.psp()
         if psp.get("status") == "technical_setup":
             self.transition("certification", f"Begin {self.name} cash-deposit certification")
@@ -1242,6 +1237,18 @@ class Provisioner:
             atomic_json(self.report_path, report)
         log(f"RESULT {outcome}; report: {self.report_path}")
 
+    def ensure_sandbox(self) -> str:
+        """Opens the partner's sandbox technical setup and returns its sandbox
+        key (kept in secrets.json as sandbox_api_key): its statement profiles,
+        its test webhook endpoint and, for the simulator bank, the simulator."""
+        if self.psp().get("status") == "commercial_setup":
+            self.transition("technical_setup", f"Open {self.name} sandbox technical setup")
+        sandbox_key = self.reveal_onboarding_key("sandbox")
+        self.ensure_statement_profile(sandbox_key)
+        self.ensure_webhook_endpoint("test", sandbox_key)
+        self.hand_to_simulator("test", sandbox_key)
+        return sandbox_key
+
     def apply(self) -> int:
         self.require_runtime()
         self.verify_launch_matrix()
@@ -1252,6 +1259,15 @@ class Provisioner:
         self.ensure_commercial()
         self.ensure_capabilities()
         self.ensure_safeguarding_accounts()
+        if str(nested(self.config, "deployment.stop_at", "pilot")).strip() == "sandbox":
+            # Dev: the partner integrates with its sandbox key and does the
+            # certification tasks itself; stop_at: pilot then goes on.
+            self.step(f"open {self.name}'s sandbox and keep its key (stop_at: sandbox)")
+            if not self.dry_run:
+                self.ensure_sandbox()
+                log(f"      {self.name}'s sandbox key: sandbox_api_key in {self.secrets_path}")
+            self.report("sandbox_ready")
+            return 0
         if not self.ensure_certification():
             self.report("waiting_for_certification")
             return 3
