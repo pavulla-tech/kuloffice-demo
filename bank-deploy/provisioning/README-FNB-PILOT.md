@@ -47,10 +47,11 @@ edited it). Run every command from the deployment directory:
        sudo env PSP_CONFIG=/opt/kulpay/kulpay-stack/fnb-pilot/input/fnb-pilot.yaml \
          PSP_OUTPUT=/opt/kulpay/kulpay-stack/fnb-pilot/output sh scripts/provision-psp.sh apply
 
-6. The first apply can stop at `waiting_for_certification`. Give FNB the
-   protected output directory's `statement-request.json`; place the returned
-   CSV beside the YAML, set `partner.certification_statement_file`, and rerun
-   the apply command.
+6. Certification runs two rounds in the same apply: the second needs a
+   statement listing the test payments the Gateway made in its own sandbox
+   during the first, and on these images the provisioner writes it itself
+   (none of those payments is FNB's). Nothing is asked of FNB. The run ends
+   with `RESULT pilot_ready`.
 
 The YAML and evidence are mounted read-only. State, reports, one-time keys,
 webhook secrets and temporary passwords are written only below

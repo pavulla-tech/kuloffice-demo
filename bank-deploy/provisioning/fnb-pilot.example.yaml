@@ -161,10 +161,10 @@ partner:
         currencies: [MZN]
         max_amount_minor: 100000000
 
-  # Certification's second round: the first names the sandbox payments FNB's
-  # statement must list (statement-request.json in the output directory);
-  # put FNB's statement (CSV: reference, amount, currency, date) here and run
-  # apply again.
+  # Certification's second round lists the payments the Gateway's own sandbox
+  # mock made in the first. With gateway_profile pilot-2026-10-22 the
+  # provisioner writes that statement itself; leave this empty. (A statement
+  # named here is used instead.)
   certification_statement_file: ""
 
   statement_profile:

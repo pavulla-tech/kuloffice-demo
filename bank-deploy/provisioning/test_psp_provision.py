@@ -396,6 +396,20 @@ class PSPProvisionTests(unittest.TestCase):
             self.assertTrue(provisioner.ensure_certification())
             self.assertEqual([c for c in calls if len(c) == 5][-1][3:], ({"rerun_of": "run-1"}, {"statement": (root / "fnb.csv").read_text()}))
 
+    def test_on_the_pilot_images_the_provisioner_writes_the_statement(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "sample.csv").write_text("sample")
+            config = {"deployment": {"gateway_profile": "pilot-2026-10-22"},
+                      "partner": {"short_name": "FNB", "statement_profile": {"sample_file": str(root / "sample.csv")}}}
+            provisioner, calls = self.certifying(root, config)
+            provisioner.partner_tasks = lambda *_args: None
+            self.assertTrue(provisioner.ensure_certification(), "one apply, both rounds")
+            self.assertFalse((root / "statement-request.json").exists(), "nothing asked of the bank")
+            rerun = [c for c in calls if len(c) == 5][-1]
+            self.assertEqual(rerun[3], {"rerun_of": "run-1"})
+            self.assertTrue(rerun[4]["statement"].startswith("reference,amount,currency,date\nmock_1,100,MZN,"))
+
     def test_the_webhook_endpoint_is_registered_once_and_its_secret_kept(self):
         with tempfile.TemporaryDirectory() as directory:
             provisioner = psp.Provisioner({"partner": {"short_name": "SIMBANK", "webhooks": {

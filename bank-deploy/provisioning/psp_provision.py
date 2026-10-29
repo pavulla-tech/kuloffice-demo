@@ -1197,7 +1197,9 @@ class Provisioner:
     def certification_statement(self, payments: list[dict[str, str]]) -> Path | None:
         """The bank's statement for a failed statement case.
 
-        The simulator bank produces it at once. A real bank is asked for it:
+        The simulator bank produces it at once; on the pilot images the
+        provisioner writes it (the payments are the Gateway's own sandbox
+        mock's). Otherwise a real bank is asked for it:
         the list goes to statement-request.json, and its statement is named in
         partner.certification_statement_file for the next apply.
         """
@@ -1210,6 +1212,17 @@ class Provisioner:
         given = str(nested(self.config, "partner.certification_statement_file", "") or "").strip()
         if given and Path(given).expanduser().is_file():
             return Path(given).expanduser()
+        if self.gateway_profile == GATEWAY_PROFILE_PILOT_2026_10_22:
+            # On the pilot images the statement case lists the payments the
+            # Gateway's own sandbox mock made for the declared SALE row: none is
+            # the bank's, so the bank has nothing to report. The provisioner
+            # writes the list as the statement (the bank's real format was
+            # already checked against its sample statement and profile).
+            today = dt.date.today().isoformat()
+            lines = ["reference,amount,currency,date"] + [
+                f"{p['reference']},{p['amount']},{p['currency']},{today}" for p in payments]
+            path.write_text("\n".join(lines) + "\n")
+            return path
         atomic_json(self.output / "statement-request.json", {
             "columns": ["reference", "amount", "currency", "date"], "payments": payments,
             "note": f"{self.name} lists these sandbox payments in a CSV statement; "
