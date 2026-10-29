@@ -375,6 +375,46 @@ class PSPProvisionTests(unittest.TestCase):
             self.assertEqual(len(endpoints), 1)
             self.assertEqual(json.loads((Path(directory) / "secrets.json").read_text())["test_webhook_secret"], "whsec_x")
 
+    def test_one_url_for_both_modes_registers_an_endpoint_per_mode(self):
+        with tempfile.TemporaryDirectory() as directory:
+            url = "http://simulator:8085/partner-webhooks"
+            provisioner = psp.Provisioner({"partner": {"short_name": "SIMBANK", "webhooks": {
+                "test_url": url, "live_url": url}}}, Path(directory))
+            endpoints: list = []
+
+            class API:
+                def call(self, method, path, body=None, **_kwargs):
+                    if method == "GET":
+                        return 200, {"data": list(endpoints)}, {}
+                    endpoint = {"id": f"we_{len(endpoints) + 1}", "url": body["url"], "mode": body["mode"]}
+                    endpoints.append(endpoint)
+                    return 201, {**endpoint, "secret": "whsec_" + body["mode"]}, {}
+
+            provisioner.partner_api = lambda key: API()
+            provisioner.ensure_webhook_endpoint("test", "key")
+            provisioner.ensure_webhook_endpoint("live", "key")
+            self.assertEqual([e["mode"] for e in endpoints], ["test", "live"])
+            secrets = json.loads((Path(directory) / "secrets.json").read_text())
+            self.assertEqual((secrets["test_webhook_secret"], secrets["live_webhook_secret"]), ("whsec_test", "whsec_live"))
+
+    def test_an_endpoint_whose_secret_was_not_kept_is_rolled(self):
+        with tempfile.TemporaryDirectory() as directory:
+            url = "http://bank.example/webhooks"
+            provisioner = psp.Provisioner({"partner": {"short_name": "FNB", "webhooks": {"live_url": url}}}, Path(directory))
+            calls: list = []
+
+            class API:
+                def call(self, method, path, body=None, **_kwargs):
+                    calls.append((method, path))
+                    if method == "GET":
+                        return 200, {"data": [{"id": "we_9", "url": url, "mode": "live"}]}, {}
+                    return 200, {"endpoint": {"id": "we_9", "secret": "whsec_new"}}, {}
+
+            provisioner.partner_api = lambda key: API()
+            provisioner.ensure_webhook_endpoint("live", "key")
+            self.assertIn(("POST", "/webhook-endpoints/we_9/roll-secret"), calls)
+            self.assertEqual(json.loads((Path(directory) / "secrets.json").read_text())["live_webhook_secret"], "whsec_new")
+
     def test_the_simulator_bank_config_loads(self):
         if psp.yaml is None:
             self.skipTest("PyYAML is tested in the provisioner image")

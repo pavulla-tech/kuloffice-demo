@@ -876,9 +876,18 @@ class Provisioner:
         api = self.partner_api(key)
         _, listed, _ = api.call("GET", "/webhook-endpoints")
         rows = listed.get("data", []) if isinstance(listed, dict) else []
-        if any(row.get("url") == url and not row.get("disabled_at") for row in rows):
+        # The same URL may serve both modes (the simulator bank's does): an
+        # endpoint counts only in its own mode.
+        existing = next((row for row in rows if row.get("url") == url and row.get("mode", mode) == mode
+                         and not row.get("disabled_at")), None)
+        if existing is not None:
             if not self.secret_values.get(f"{mode}_webhook_secret"):
-                log(f"WARN  the {mode} webhook endpoint exists but its secret is not in secrets.json; rotate it in the portal")
+                # Its secret was shown once and not kept: a new one, kept now.
+                _, rolled, _ = api.call("POST", f"/webhook-endpoints/{existing['id']}/roll-secret", {})
+                self.secret_values[f"{mode}_webhook_secret"] = (rolled.get("endpoint") or {})["secret"]
+                self.state[f"{mode}_webhook_endpoint_id"] = existing.get("id")
+                self.save()
+                log(f"      the {mode} webhook endpoint's secret was not kept: rolled, the new one is in secrets.json")
             return
         body: dict[str, Any] = {"url": url, "mode": mode}
         events = nested(self.config, "partner.webhooks.event_types")
@@ -1102,6 +1111,14 @@ class Provisioner:
         # The Gateway necessarily issues a full secret key on entering pilot.
         # Replace it immediately with the least-privilege restricted key the partner
         # needs for the agreed flows, then revoke the broad one.
+        if self.state.get("broad_pilot_key_revoked"):
+            # Done before: the broad key is gone, and the restricted key has no
+            # webhook scope, so a missing live endpoint is the partner's to add.
+            if nested(self.config, "partner.webhooks.live_url") and not self.secret_values.get("live_webhook_secret"):
+                log(f"WARN  {self.name} has no live webhook secret and its full key is revoked: add or roll the live "
+                    "endpoint in the Gateway's partner portal and keep its secret")
+            self.hand_to_simulator("live", self.secret_values["partner_live_api_key"])
+            return
         broad_key = self.reveal_onboarding_key("live")
         broad_api = self.partner_api(broad_key)
         if not self.secret_values.get("partner_live_api_key"):
