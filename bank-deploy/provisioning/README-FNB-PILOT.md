@@ -6,20 +6,23 @@ They do not pull packages or contact the internet, and they do not need
 Makefile targets of the same names run exactly these).
 
 The installed stack is `/opt/kulpay/kulpay-stack`, with Compose in
-`/opt/kulpay/kulpay-stack/deployment`. Run every command from there:
+`/opt/kulpay/kulpay-stack/deployment` and the reverse proxy installed as the
+overlay `compose.nginx.yaml`: every Compose command names all three files.
+The update leaves the deployment `Makefile` as it is (the proxy installer
+edited it). Run every command from the deployment directory:
 
     cd /opt/kulpay/kulpay-stack/deployment
 
 1. Back up, install the update and reload the Gateway (the update adds a
    launch matrix that enables live cash deposits through partner banks):
 
-       sudo env COMPOSE="docker compose --env-file .env -f compose.yaml -f compose.miniailive.yaml" sh scripts/backup.sh
-       sudo cp Makefile Makefile.rev3 && sudo cp compose.yaml compose.yaml.rev3
+       sudo env COMPOSE="docker compose --env-file .env -f compose.yaml -f compose.miniailive.yaml -f compose.nginx.yaml" sh scripts/backup.sh
+       sudo cp compose.yaml compose.yaml.rev3
        sudo unzip -o /path/to/kulpay-bank-pilot-2026.10.22-rev4-update.zip -d /opt/kulpay/kulpay-stack
        sudo env ENV_FILE=.env sh scripts/check-config.sh
-       sudo docker compose --env-file .env -f compose.yaml -f compose.miniailive.yaml config --quiet
-       sudo docker compose --env-file .env -f compose.yaml -f compose.miniailive.yaml up -d --force-recreate gateway-config gateway
-       sudo env COMPOSE="docker compose --env-file .env -f compose.yaml -f compose.miniailive.yaml" sh scripts/health.sh
+       sudo docker compose --env-file .env -f compose.yaml -f compose.miniailive.yaml -f compose.nginx.yaml config --quiet
+       sudo docker compose --env-file .env -f compose.yaml -f compose.miniailive.yaml -f compose.nginx.yaml up -d --force-recreate gateway-config gateway
+       sudo env COMPOSE="docker compose --env-file .env -f compose.yaml -f compose.miniailive.yaml -f compose.nginx.yaml" sh scripts/health.sh
 
 2. Create protected input and output directories outside the deployment
    tree, and install the template there. Keep all KYB, contract and
