@@ -13,13 +13,15 @@ gateway.ACCOUNT_ID = "acc_kuloffice"
 gateway.CHECKER_KEY = "checker-key"
 
 ACTIVE_BILLER = {"id": "bil_1", "code": "KULPAY", "tenant_id": "acc_kuloffice", "status": "active"}
+INVOICE_PRODUCT = {"code": "FATURA", "amount_rule": "presented", "enabled": True}
 
 
 class FakeGateway:
-    def __init__(self, incoming=None, sink=None, biller=ACTIVE_BILLER, approvals=()):
+    def __init__(self, incoming=None, sink=None, biller=ACTIVE_BILLER, approvals=(), products=(INVOICE_PRODUCT,)):
         self.incoming = incoming
         self.sink = sink
         self.biller = dict(biller) if biller else None
+        self.products = [dict(p) for p in products] if biller else []
         self.approvals = list(approvals)
         self.calls = []
 
@@ -47,7 +49,12 @@ class FakeGateway:
         if method == "GET" and path == "/admin/billers/KULPAY":
             if self.biller is None:
                 raise RuntimeError("GET /admin/billers/KULPAY failed: 404 {\"error\":\"not_found\"}")
-            return 200, {"biller": self.biller, "products": []}
+            return 200, {"biller": self.biller, "products": self.products}
+        if method == "POST" and path == "/admin/billers/KULPAY/products":
+            self.products.append(dict(body))
+            return 201, body
+        if method == "PUT" and path == "/admin/accounts/acc_kuloffice/cash-in-incoming":
+            return 200, {"enabled": True}
         if method == "POST" and path == "/admin/billers":
             self.biller = {**body, "id": "bil_new", "status": "draft"}
             return 201, self.biller
@@ -210,7 +217,7 @@ class PartnersKeyTest(unittest.TestCase):
         )
         stdout, _ = self.run_main(fake)
         self.assertEqual(stdout, "")
-        self.assertFalse(any(c[1].startswith("/admin/accounts/") for c in fake.calls))
+        self.assertFalse(any(c[1].startswith("/admin/accounts/") and c[1].endswith("/keys") for c in fake.calls))
 
     def tearDown(self):
         gateway.BILLER_PROVISIONING, gateway.HAVE_PARTNERS_KEY = False, False
@@ -232,14 +239,15 @@ class KulOfficeBillerTest(unittest.TestCase):
     def test_a_missing_biller_is_created_activated_and_approved(self):
         fake = FakeGateway(biller=None)
         summary, stderr = self.ensure(fake)
-        self.assertEqual(summary, "created, activation requested, activated")
-        self.assertEqual(stderr.strip(), "KulOffice biller KULPAY: created, activation requested, activated")
+        self.assertEqual(summary, "created, invoice product added, activation requested, activated")
+        self.assertEqual(stderr.strip(), "KulOffice biller KULPAY: created, invoice product added, activation requested, activated")
         self.assertNotIn("admin-key", stderr)
         self.assertNotIn("checker-key", stderr)
         steps = [(c[0], c[1].split("?")[0], c[2]) for c in fake.calls]
         self.assertEqual(steps, [
             ("GET", "/admin/billers/KULPAY", "admin-key"),
             ("POST", "/admin/billers", "admin-key"),
+            ("POST", "/admin/billers/KULPAY/products", "admin-key"),
             ("GET", "/admin/approvals", "admin-key"),
             ("POST", "/admin/billers/KULPAY/status", "admin-key"),
             ("POST", "/admin/approvals/apr_new/decide", "checker-key"),
@@ -251,9 +259,18 @@ class KulOfficeBillerTest(unittest.TestCase):
             "presentment_modes": ["push"], "remit_bank": "FNB", "remit_account": "0028000090002922",
             "remit_frequency": "daily",
         })
-        self.assertIn("subject_id=bil_new", fake.calls[2][1])
-        self.assertEqual(fake.calls[3][3]["status"], "active")
-        self.assertTrue(fake.calls[4][3]["approve"])
+        product = fake.calls[2][3]
+        self.assertEqual((product["code"], product["amount_rule"], product["shape"], product["enabled"]),
+                         ("FATURA", "presented", "postpaid", True))
+        self.assertIn("subject_id=bil_new", fake.calls[3][1])
+        self.assertEqual(fake.calls[4][3]["status"], "active")
+        self.assertTrue(fake.calls[5][3]["approve"])
+
+    def test_an_active_biller_without_an_invoice_product_gets_one(self):
+        fake = FakeGateway(products=[{"code": "OTHER", "amount_rule": "fixed", "enabled": True}])
+        summary, _ = self.ensure(fake)
+        self.assertEqual(summary, "invoice product added")
+        self.assertEqual([c[:2] for c in fake.calls], [("GET", "/admin/billers/KULPAY"), ("POST", "/admin/billers/KULPAY/products")])
 
     def test_an_active_biller_is_only_read(self):
         fake = FakeGateway()
@@ -279,6 +296,21 @@ class KulOfficeBillerTest(unittest.TestCase):
         self.assertFalse(any(c[1] == "/admin/billers/KULPAY/status" for c in fake.calls))
         decided = [c for c in fake.calls if c[1].endswith("/decide")]
         self.assertEqual([(c[1], c[2]) for c in decided], [("/admin/approvals/apr_pending/decide", "checker-key")])
+
+    def test_main_turns_cash_deposits_on_unless_told_not_to(self):
+        gateway.ACCOUNT_KEY, gateway.MODE = "account-key", "live"
+        gateway.HAVE_INCOMING_SECRET = gateway.HAVE_SERVICE_SECRET = True
+        for on in (True, False):
+            fake = FakeGateway(
+                incoming={"id": "wh_1", "mode": "live", "url": gateway.URL, "status": "active", "event_types": ["*"]},
+                sink={"id": "sink_1", "mode": "live", "url": gateway.URL, "enabled": True, "event_types": ["payment.*"]},
+            )
+            gateway.request, gateway.CASH_IN_INCOMING = fake, on
+            with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+                gateway.main()
+            put = ("PUT", "/admin/accounts/acc_kuloffice/cash-in-incoming") in [c[:2] for c in fake.calls]
+            self.assertEqual(put, on)
+        gateway.CASH_IN_INCOMING = True
 
     def test_main_ensures_the_biller(self):
         gateway.ACCOUNT_KEY, gateway.MODE = "account-key", "live"

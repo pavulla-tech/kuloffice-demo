@@ -423,8 +423,13 @@ The command idempotently creates KulOffice's account webhook for
 `incoming_transfer.*` and the platform `payment.*` event sink. It also makes sure
 KulOffice's own Gateway biller (`KULPAY`, owned by `GATEWAY_ACCOUNT_ID`) exists
 and is active: when missing it is created, its activation requested with the
-operator key and approved with `GATEWAY_CHECKER_KEY`; a biller with that code
-on another account stops the command unchanged. Their one-time
+operator key and approved with `GATEWAY_CHECKER_KEY` (with the invoice product
+`FATURA` the Gateway needs before activating it); a biller with that code on
+another account stops the command unchanged. It also turns on
+`cash_in_incoming` for KulOffice's account, so partner cash deposits for
+KulOffice's references reach KulOffice (`GATEWAY_CASH_IN_INCOMING=0` skips it).
+Both live in the Gateway's database, so after a Gateway reset this command
+puts them back. Their one-time
 signing secrets are written to the ignored `.env` without being printed, then
 KulOffice is recreated. If an endpoint exists but `.env` lost its secret, the
 command rotates that secret with a 24-hour grace period. The deployment tool's

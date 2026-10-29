@@ -30,10 +30,11 @@ HAVE_SERVICE_SECRET = bool(os.environ.get("KULOFFICE_PAYMENT_ACCEPTANCE_WEBHOOK_
 ACCOUNT_EVENTS = ["incoming_transfer.*", "bill_invoice.*", "bill_remittance.*", "bill_subscription.*",
                   "biller.integration_status", "biller.technical_contact_replaced"]
 ACCOUNT_ID = os.environ.get("GATEWAY_ACCOUNT_ID", "")
-# GATEWAY_CASH_IN_INCOMING=1 (make cash-deposits): a cash deposit a partner
-# takes for one of KulOffice's references is also recorded as an incoming
-# transfer to KulOffice, which credits the customer.
-CASH_IN_INCOMING = os.environ.get("GATEWAY_CASH_IN_INCOMING", "") == "1"
+# A cash deposit a partner takes for one of KulOffice's references is also
+# recorded as an incoming transfer to KulOffice, which credits the customer.
+# A Gateway setting, so a Gateway reset loses it: every run restores it (dev:
+# nothing off). GATEWAY_CASH_IN_INCOMING=0 leaves it alone.
+CASH_IN_INCOMING = os.environ.get("GATEWAY_CASH_IN_INCOMING", "").strip() != "0"
 # GATEWAY_BILLER_PROVISIONING=1 (make gateway-billers): the partners key
 # KulOffice provisions approved billers with (service:partners:write, an
 # operator-only scope, issued by the admin key on KulOffice's own account).
@@ -56,6 +57,21 @@ BILLER = {
     "remit_bank": os.environ.get("GATEWAY_KULOFFICE_REMIT_BANK", "").strip() or "FNB",
     "remit_account": os.environ.get("GATEWAY_KULOFFICE_REMIT_ACCOUNT", "").strip() or "0028000090002922",
     "remit_frequency": os.environ.get("GATEWAY_KULOFFICE_REMIT_FREQUENCY", "").strip() or "daily",
+}
+# The Gateway activates a biller only with an enabled product whose amount the
+# biller presents: KulOffice's invoices.
+BILLER_PRODUCT = {
+    "code": "FATURA",
+    "name": "Factura",
+    "shape": "postpaid",
+    "currency": "MZN",
+    "amount_rule": "presented",
+    "reference_label": "Número da factura",
+    "reference_pattern": "^[A-Z0-9-]{3,40}$",
+    "reference_example": "F-20261029-1631",
+    "model": "agent",
+    "fee_bearer": "biller",
+    "enabled": True,
 }
 
 
@@ -228,17 +244,22 @@ def ensure_kuloffice_biller():
     try:
         _, current = request("GET", f"/admin/billers/{code}", ADMIN_KEY)
         biller = (current or {}).get("biller") or {}
+        products = (current or {}).get("products") or []
     except RuntimeError as error:
         if "failed: 404 " not in str(error):
             raise
         _, biller = request("POST", "/admin/billers", ADMIN_KEY, {**BILLER, "tenant_id": ACCOUNT_ID})
         biller = biller or {}
+        products = []
         done.append("created")
     if biller.get("tenant_id") != ACCOUNT_ID:
         raise RuntimeError(
             f"Gateway biller {code} belongs to another account ({biller.get('tenant_id') or 'none'}); "
             "left unchanged. Free the code or set GATEWAY_KULOFFICE_BILLER_CODE"
         )
+    if not any(p.get("enabled") and p.get("amount_rule") == "presented" for p in products):
+        request("POST", f"/admin/billers/{code}/products", ADMIN_KEY, BILLER_PRODUCT)
+        done.append("invoice product added")
     if biller.get("status") != "active":
         if not biller.get("id"):
             raise RuntimeError(f"Gateway returned biller {code} without its id")
