@@ -466,6 +466,26 @@ refuses the binding's authorizations.
 `bin/kulpay provision` writes it too, so a Gateway reset followed by provision
 needs no hand step.
 
+### Development seeds (texts and business policies)
+
+On a development stack (`DEV_ADMIN_EMAIL` and `DEV_ADMIN_PASSWORD` set), every
+`bin/kulpay provision` and every kuloffice, keycloak or gateway deploy signs in as
+the development admin and runs `tools/dev_rules.py`:
+
+- the notification texts in `tools/dev_texts.json` (including the five agent SMS
+  KulOffice waits for before an agent application starts or an operator code is
+  sent) are proposed and approved where none is in force;
+- each business policy in `tools/dev_policies.json` (all ten keys: example
+  figures, not the owner's) is proposed and approved when its key has no version
+  at all. A key with an operator's version in any state is left alone, so to move
+  an existing policy (for example `merchant_collections` with only `online_shop`)
+  propose a new version in the back office.
+
+Both need `KULOFFICE_APPROVALS_SINGLE_OPERATOR=true` (one operator decides on
+dev). `tools/dev_policies_check/check.sh <KulOffice checkout>` proves every
+policy document passes KulOffice's own validators (`go test -overlay`; nothing
+is written in the checkout). Run it when KulOffice changes a policy's shape.
+
 Incoming transfers, supply, Payment Acceptance and reconciliation remain off
 by default. Enable them in that order after each smoke test. Supply must not be
 enabled until `KULOFFICE_SUPPLY_CLEARING_BALANCE` names the real BLNK clearing

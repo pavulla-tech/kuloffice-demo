@@ -1,0 +1,673 @@
+{
+  "_about": "Development stacks' business policies: tools/dev_rules.py proposes and approves each one whose key has no version at all yet (an operator's version, in any state, is never replaced). Example figures, not the owner's. Each document is complete and validated against KulOffice's own validators (tools/dev_policies_check/).",
+  "policies": [
+    {
+      "key": "account_limits",
+      "source": "KulOffice docs/BUSINESS_RULES.md (account_limits)",
+      "document": {
+        "personal_lite": {
+          "per_transaction_max_minor": 500000,
+          "daily_out_max_minor": 1000000,
+          "yearly_out_max_minor": 10000000,
+          "daily_in_max_minor": 1000000,
+          "max_balance_minor": 2500000
+        },
+        "personal_verified": {
+          "per_transaction_max_minor": 5000000,
+          "daily_out_max_minor": 10000000,
+          "yearly_out_max_minor": 100000000,
+          "daily_in_max_minor": 1000000,
+          "max_balance_minor": 5000000
+        },
+        "business": {
+          "per_transaction_max_minor": 50000000,
+          "daily_out_max_minor": 100000000,
+          "yearly_out_max_minor": 1000000000,
+          "daily_in_max_minor": 100000000,
+          "max_balance_minor": 1000000000
+        }
+      }
+    },
+    {
+      "key": "claim_send",
+      "source": "KulOffice docs/BUSINESS_RULES.md (claim_send)",
+      "document": {
+        "enabled": true,
+        "notification_language": "pt",
+        "ttl_days": 7,
+        "kyc_grace_days": 3,
+        "min_minor": 1000,
+        "max_per_send_minor": 500000,
+        "sender_daily_max_minor": 1000000,
+        "sender_open_max": 3,
+        "recipient_pending_max_minor": 700000
+      }
+    },
+    {
+      "key": "orientu",
+      "source": "KulOffice docs/orientu/politica-v1.exemplo.json",
+      "document": {
+        "notification_language": "pt",
+        "family": {
+          "enabled": true,
+          "target_min_minor": 5000,
+          "target_max_by_tier_minor": {
+            "personal_lite": 1000000,
+            "personal_verified": 5000000
+          },
+          "open_requests_max_by_tier": {
+            "personal_lite": 2,
+            "personal_verified": 5
+          },
+          "recipients_max": 50,
+          "min_app_recipients": 1,
+          "categories": [],
+          "split_enabled": true,
+          "deadline_min_days": 1,
+          "deadline_max_days": 90,
+          "deadline_warning_hours": 48,
+          "close_on_target_default": true,
+          "commitment_retry_hours": 24,
+          "commitment_reminder_hours": 24,
+          "sms_to_non_customers": true,
+          "sms_to_customers": true,
+          "sms_max_per_request": 50
+        },
+        "personal": {
+          "enabled": true,
+          "deadline_days": 7,
+          "open_requests_max_by_tier": {
+            "personal_lite": 5,
+            "personal_verified": 10
+          },
+          "daily_max": 10,
+          "reminder_hours": 24
+        },
+        "cause": {
+          "enabled": true,
+          "eligible_tiers": [
+            "personal_verified"
+          ],
+          "max_open_per_customer": 1,
+          "target_min_minor": 100000,
+          "target_max_minor": 500000000,
+          "enhanced_review_above_minor": 50000000,
+          "deadline_min_days": 7,
+          "deadline_max_days": 120,
+          "evidence_max_files": 10,
+          "evidence_max_mb": 10,
+          "categories": [
+            "saude",
+            "educacao",
+            "funeral",
+            "emergencia",
+            "comunidade"
+          ],
+          "prohibited_categories": [
+            "politica_partidaria",
+            "armas",
+            "jogos",
+            "saude_sem_documento"
+          ],
+          "review_sla_hours": 24,
+          "reports_auto_suspend_at": 5,
+          "funds_release_options": [
+            "immediate",
+            "at_close"
+          ],
+          "tips_allowed": true,
+          "anonymous_contributions": true,
+          "declaration_version": 1,
+          "declaration_text": "Declaro que a informação desta causa é verdadeira e que o dinheiro angariado será usado para o fim descrito.",
+          "hold_max_days": 30,
+          "hold_reasons": [
+            "fraud_suspicion",
+            "documents_pending",
+            "reports",
+            "kyc_refresh",
+            "other"
+          ],
+          "share": {
+            "enabled": true,
+            "new_codes_per_hour": 30
+          },
+          "follow": {
+            "enabled": true,
+            "auto_follow_donors": true,
+            "max_followed": 200,
+            "milestones_pct": [
+              25,
+              50,
+              75,
+              100
+            ],
+            "deadline_near_days": 3,
+            "min_minutes_between_alerts": 30,
+            "digests": [
+              "daily",
+              "weekly"
+            ],
+            "default_digest": "daily",
+            "digest_hour": 19,
+            "digest_weekday": 0
+          },
+          "supporters": {
+            "enabled": true,
+            "allow_amounts": true,
+            "preview_size": 8,
+            "page_size": 50
+          },
+          "updates": {
+            "enabled": true,
+            "review": "four_eyes",
+            "max_per_day": 3,
+            "after_close_days": 30,
+            "max_chars": 1000,
+            "max_photos": 5
+          },
+          "transparency": {
+            "enabled": true,
+            "purpose_required": false
+          }
+        },
+        "contribution": {
+          "min_minor": 1000,
+          "non_customer_max_minor": 500000,
+          "received_monthly_max_by_tier_minor": {
+            "personal_lite": 2500000,
+            "personal_verified": 25000000
+          },
+          "channels": [
+            "wallet",
+            "link",
+            "cash"
+          ]
+        },
+        "risk": {
+          "alert_new_contributors_per_hour": 20,
+          "alert_same_phone_contributions_per_day": 5
+        },
+        "tax": {
+          "donation_treatment": "",
+          "receipt_enabled": false
+        }
+      }
+    },
+    {
+      "key": "payment_terms",
+      "source": "KulOffice docs/payment-terms/politica-v1.exemplo.json",
+      "document": {
+        "products": {
+          "payment_request": {
+            "modes": [
+              "once",
+              "instalments",
+              "open"
+            ],
+            "periods": [
+              "none",
+              "monthly"
+            ],
+            "max_payments_max": 12,
+            "min_payment_floor": "50.00",
+            "overpay": [
+              "refuse",
+              "accept",
+              "credit_next"
+            ],
+            "excess_default": [
+              "keep",
+              "credit_next",
+              "refund"
+            ],
+            "ends": [
+              "on_total",
+              "on_deadline"
+            ],
+            "max_lifetime_days": 365,
+            "schedules": true,
+            "reminders_max": 5,
+            "reminder_days_max": 15
+          },
+          "orientu_family": {
+            "modes": [
+              "open",
+              "instalments"
+            ],
+            "periods": [
+              "none",
+              "weekly",
+              "monthly"
+            ],
+            "max_payments_max": 24,
+            "min_payment_floor": "10.00",
+            "overpay": [
+              "accept",
+              "refuse"
+            ],
+            "excess_default": [
+              "keep",
+              "refund"
+            ],
+            "ends": [
+              "on_total",
+              "on_deadline"
+            ],
+            "max_lifetime_days": 180,
+            "schedules": true,
+            "reminders_max": 3,
+            "reminder_days_max": 7
+          },
+          "orientu_cause": {
+            "modes": [
+              "open"
+            ],
+            "periods": [
+              "none"
+            ],
+            "overpay": [
+              "accept"
+            ],
+            "excess_default": [
+              "keep"
+            ],
+            "ends": [
+              "on_total",
+              "on_deadline"
+            ],
+            "max_lifetime_days": 180
+          }
+        },
+        "excess": {
+          "decision_days": 30,
+          "remind_receiver_days": [
+            7,
+            25
+          ]
+        },
+        "payer_reminders": {
+          "max_per_reference": 3
+        }
+      }
+    },
+    {
+      "key": "merchant_collections",
+      "source": "KulOffice docs/merchants/politica-v1.exemplo.json",
+      "document": {
+        "enabled": true,
+        "notification_language": "pt",
+        "max_accounts_per_business": 10,
+        "default_risk": "medium",
+        "segments": {
+          "lite": {
+            "max_accounts": 1,
+            "risk": "medium"
+          },
+          "pro": {
+            "max_accounts": 5,
+            "risk": "medium"
+          },
+          "enterprise": {
+            "max_accounts": 20,
+            "risk": "low"
+          }
+        },
+        "limits_by_risk": {
+          "low": {
+            "per_payment_max_minor": 50000000,
+            "daily_in_max_minor": 500000000
+          },
+          "medium": {
+            "per_payment_max_minor": 10000000,
+            "daily_in_max_minor": 100000000
+          },
+          "high": {
+            "per_payment_max_minor": 2000000,
+            "daily_in_max_minor": 20000000
+          }
+        },
+        "purposes": [
+          "shop",
+          "online_shop",
+          "integration",
+          "agent_commissions",
+          "other"
+        ],
+        "max_associated_per_account": 5,
+        "max_rules_per_account": 10,
+        "sole_member_approves": true,
+        "destination_cooling_hours": 24,
+        "plan_failures_to_pause": 3,
+        "manual_clearing_approval_above_minor": 10000000,
+        "holidays": [
+          "2026-01-01",
+          "2026-02-03",
+          "2026-04-07",
+          "2026-05-01",
+          "2026-06-25",
+          "2026-09-07",
+          "2026-09-25",
+          "2026-10-04",
+          "2026-12-25"
+        ],
+        "retention": [
+          {
+            "psp": "emola",
+            "days": 1
+          },
+          {
+            "channel": "transfer",
+            "risk": "high",
+            "days": 3
+          }
+        ],
+        "rolling_reserve": {
+          "high": {
+            "percent_bps": 1000,
+            "days": 60
+          }
+        },
+        "clearing_daily_max_by_risk": {
+          "low": 5000000000,
+          "medium": 1000000000,
+          "high": 200000000
+        },
+        "clearing_min_order_minor": 10000,
+        "refund_approval_above_minor": 5000000,
+        "require_integration": false,
+        "notify_entry_above_minor": 1000000
+      }
+    },
+    {
+      "key": "agents",
+      "source": "KulOffice docs/AGENTS.md (the policy), dev: terminal.min_app_version empty, terminal.integrity_required false",
+      "document": {
+        "enabled": true,
+        "notification_language": "pt",
+        "application_expiry_days": 30,
+        "levels": {
+          "basic": {
+            "services": [
+              "S1",
+              "S4",
+              "S5",
+              "S6",
+              "S8"
+            ]
+          },
+          "agent": {
+            "services": [
+              "S1",
+              "S2",
+              "S3",
+              "S4",
+              "S5",
+              "S6",
+              "S7",
+              "S8"
+            ],
+            "float_max_minor": 50000000,
+            "float_alert_minor": 500000
+          },
+          "aggregator": {
+            "services": [
+              "S1",
+              "S2",
+              "S3",
+              "S4",
+              "S5",
+              "S6",
+              "S7",
+              "S8"
+            ]
+          }
+        },
+        "categories": {
+          "kulite": {
+            "levels": [
+              "basic",
+              "agent"
+            ],
+            "devices": [
+              "own_smartphone",
+              "ussd"
+            ],
+            "max_outlets": 1,
+            "max_devices_per_outlet": 2,
+            "max_operators": 3
+          },
+          "kulpro": {
+            "levels": [
+              "agent"
+            ],
+            "devices": [
+              "own_smartphone",
+              "kulpay_pos"
+            ],
+            "max_outlets": 50,
+            "max_devices_per_outlet": 12,
+            "max_operators": 500
+          }
+        },
+        "opt_in": {
+          "kyb_max_age_days": {
+            "low": 365,
+            "medium": 180,
+            "high": 90
+          },
+          "default_level": "agent"
+        },
+        "services": {
+          "S1": {
+            "min_minor": 2000,
+            "max_minor": 5000000,
+            "daily_max_minor": 20000000,
+            "commission_fixed_minor": 500,
+            "commission_basis_points": 50,
+            "max_commission_minor": 10000,
+            "quote_seconds": 120,
+            "activation_max_minor": 10000
+          },
+          "S2": {
+            "min_minor": 2000,
+            "max_minor": 2000000,
+            "daily_max_minor": 10000000,
+            "commission_fixed_minor": 300,
+            "commission_basis_points": 100,
+            "quote_seconds": 300,
+            "per_customer_daily_count": 3
+          },
+          "S8": {
+            "commission_fixed_minor": 100,
+            "quote_seconds": 300
+          },
+          "S4": {
+            "min_minor": 1000,
+            "max_minor": 5000000,
+            "daily_max_minor": 50000000,
+            "commission_fixed_minor": 200,
+            "quote_seconds": 300
+          },
+          "S5": {
+            "min_minor": 1000,
+            "max_minor": 500000,
+            "daily_max_minor": 10000000,
+            "commission_basis_points": 300,
+            "quote_seconds": 300
+          },
+          "S6": {
+            "min_minor": 1000,
+            "max_minor": 500000,
+            "daily_max_minor": 10000000,
+            "commission_fixed_minor": 100,
+            "quote_seconds": 300
+          }
+        },
+        "day_close": {
+          "difference_alert_minor": 1000
+        },
+        "commission_transfers": {
+          "min_minor": 10000,
+          "float": {
+            "enabled": true,
+            "every": "week",
+            "withholding_basis_points": 2000
+          },
+          "wallet": {
+            "enabled": true,
+            "every": "month",
+            "withholding_basis_points": 2000,
+            "automatic": true
+          }
+        },
+        "aml": {
+          "structuring_count": 5,
+          "structuring_window_hours": 24,
+          "structuring_min_total_minor": 5000000,
+          "velocity_count": 20,
+          "velocity_window_minutes": 10,
+          "circularity_window_hours": 24
+        },
+        "terminal": {
+          "pairing_code_minutes": 15,
+          "session_idle_minutes": 30,
+          "pin_length": 4,
+          "pin_attempts": 3,
+          "min_app_version": "",
+          "zone_radius_meters": 300,
+          "integrity_required": false
+        }
+      }
+    },
+    {
+      "key": "devices",
+      "source": "KulOffice docs/merchants/politica-devices.exemplo.json, dev: terminal.min_app_version empty",
+      "document": {
+        "default_terms": {
+          "agent": {
+            "kulpay_pos": {
+              "terms": "loan",
+              "deposit_minor": 0,
+              "loss_fee_minor": 1500000
+            }
+          },
+          "merchant": {
+            "kulpay_pos": {
+              "terms": "loan",
+              "deposit_minor": 250000,
+              "loss_fee_minor": 1500000
+            }
+          }
+        },
+        "require_stock": false,
+        "terminal": {
+          "pairing_code_minutes": 30,
+          "session_idle_minutes": 30,
+          "pin_length": 4,
+          "pin_attempts": 3,
+          "min_app_version": "",
+          "daily_limit_minor": 50000000,
+          "refund_max_minor": 500000,
+          "refund_daily_max_minor": 2000000,
+          "sale_minutes": 15,
+          "own_phone_refunds": false
+        },
+        "overdue_blocks": true,
+        "grace_days": 5
+      }
+    },
+    {
+      "key": "vaquinha",
+      "source": "kit: KulOffice docs/vaquinha/especificacao.md §9 defaults, completed (max_share_minor, splits, margins)",
+      "document": {
+        "enabled": true,
+        "notification_language": "pt",
+        "deadline_minutes": 30,
+        "splits_allowed": [
+          "equal",
+          "custom",
+          "free"
+        ],
+        "reservation_margin_minutes": 10,
+        "notify_organizer_before_minutes": 5,
+        "wallet_payers": true,
+        "caps": {
+          "max_participants": 10,
+          "max_bill_minor": 2000000,
+          "min_share_minor": 1000,
+          "max_share_minor": 1000000,
+          "max_open_per_organizer": 3,
+          "max_wallet_share_minor": 500000
+        },
+        "caps_by_account_type": {
+          "business": {
+            "max_bill_minor": 10000000,
+            "max_participants": 30
+          }
+        },
+        "caps_by_segment": {
+          "enterprise": {
+            "max_open_per_organizer": 20
+          }
+        }
+      }
+    },
+    {
+      "key": "budgets",
+      "source": "kit: KulOffice docs/mo-budget/especificacao.md §10 example, completed (language, number matching, validity)",
+      "document": {
+        "enabled": true,
+        "notification_language": "pt",
+        "auth_modes": [
+          "secret",
+          "app"
+        ],
+        "secret_length": 6,
+        "secret_attempts": 3,
+        "approval_timeout_seconds": 180,
+        "number_matching": true,
+        "max_validity_days": 365,
+        "expiring_notice_days": 7,
+        "caps": {
+          "max_budgets_per_account": 10,
+          "max_budget_balance_minor": 5000000,
+          "max_per_payment_minor": 500000,
+          "max_daily_minor": 1000000
+        },
+        "caps_by_account_type": {
+          "business": {
+            "max_budgets_per_account": 30,
+            "max_budget_balance_minor": 20000000
+          }
+        },
+        "caps_by_segment": {
+          "pro": {
+            "max_budget_balance_minor": 10000000
+          }
+        }
+      }
+    },
+    {
+      "key": "notifications",
+      "source": "kit: KulOffice internal/notification DefaultPolicy (what applies without a version)",
+      "document": {
+        "mandatory": [
+          "auth.verification_code",
+          "auth.pin_*",
+          "agent.operator_code",
+          "agent.cash_out_code",
+          "agent.balance_code",
+          "checkout.approval_requested"
+        ],
+        "silent_products": {
+          "merchant_collections": [
+            3
+          ],
+          "merchant_obligation": [
+            3
+          ]
+        }
+      }
+    }
+  ]
+}

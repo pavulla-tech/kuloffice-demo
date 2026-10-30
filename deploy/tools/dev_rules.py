@@ -1,4 +1,4 @@
-"""Development stacks: the notification texts KulOffice's products wait for. Idempotent.
+"""Development stacks: the notification texts and business policies KulOffice's products wait for. Idempotent.
 
 Run by bin/kulpay after the development admin is seeded (DEV_ADMIN_EMAIL and
 DEV_ADMIN_PASSWORD; never in production). It signs in as that admin, the way
@@ -8,8 +8,13 @@ language have no approved text yet, proposes it and approves it: one operator
 decides on development stacks (KULOFFICE_APPROVALS_SINGLE_OPERATOR). A text an
 operator approved is never replaced; a proposal waiting is approved as it is.
 
-The business policies (account_limits, claim_send, orientu) are decided in the
-back office: this only reports whether each has an approved version.
+Then, for every business policy in dev_policies.json (complete example
+documents, validated against KulOffice's validators by
+tools/dev_policies_check/check.sh) whose key has no version at all yet, it
+proposes the example and approves it (dev: nothing off). A key with any
+version an operator made (in force, waiting, rejected or retired) is left
+alone; a proposal this script left waiting is approved. A key the running
+KulOffice does not register is skipped.
 """
 import base64
 import hashlib
@@ -30,7 +35,9 @@ CLIENT = os.environ.get("WORKFORCE_PANEL_CLIENT", "kulpay-token-panel")
 REDIRECT = os.environ.get("WORKFORCE_PANEL_REDIRECT", "http://localhost:8765/")
 EMAIL, PASSWORD = os.environ["DEV_ADMIN_EMAIL"], os.environ["DEV_ADMIN_PASSWORD"]
 TEXTS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "dev_texts.json")
+POLICIES = os.path.join(os.path.dirname(os.path.abspath(__file__)), "dev_policies.json")
 REASON = "development stack: default text (tools/dev_texts.json)"
+POLICY_REASON = "development stack: example policy (tools/dev_policies.json)"
 
 
 def b64url(raw):
@@ -95,18 +102,8 @@ def call(token, method, path, body=None):
             return e.code, {"message": raw[:300]}
 
 
-def main():
-    with open(TEXTS, encoding="utf-8") as f:
-        wanted = json.load(f)
+def seed_texts(token, wanted):
     language = wanted["language"]
-    token = sign_in()
-
-    status, out = call(token, "GET", "/v1/business-policies")
-    if status == 200:
-        active = {p.get("key") for p in out.get("policies", []) if p.get("active_number")}
-        for key in ("account_limits", "claim_send", "orientu"):
-            if key not in active:
-                print(f"  note  business policy {key}: none approved (back office, Políticas)")
 
     def templates(state):
         status, out = call(token, "GET", f"/v1/notification-templates?status={state}&language={language}")
@@ -137,6 +134,63 @@ def main():
             continue
         made += 1
     print(f"  ok  notification texts ({language}): {made} approved now, {kept} already in force")
+
+
+def seed_policies(token, wanted):
+    """Each example policy whose key has no version yet: proposed, then
+    approved. Returns the keys approved now."""
+    status, out = call(token, "GET", "/v1/business-policies")
+    if status != 200:
+        print(f"  warn  business policies not listed: {status} {out.get('message', out)}")
+        return []
+    registered = {p.get("key"): p for p in out.get("policies", [])}
+    approved, kept = [], []
+    for policy in wanted["policies"]:
+        key = policy["key"]
+        current = registered.get(key)
+        if current is None:
+            print(f"  note  business policy {key}: not in this KulOffice, skipped")
+            continue
+        if current.get("active_number"):
+            kept.append(key)
+            continue
+        status, out = call(token, "GET", f"/v1/business-policies/{key}/versions")
+        if status != 200:
+            print(f"  warn  business policy {key}: versions not listed: {status} {out.get('message', out)}")
+            continue
+        versions = out.get("versions", [])
+        ours = next((v for v in versions if v.get("status") == "proposed" and v.get("reason") == POLICY_REASON), None)
+        if versions and ours is None:
+            states = ", ".join(sorted({v.get("status", "?") for v in versions}))
+            print(f"  note  business policy {key}: an operator's version is there ({states}); left alone")
+            continue
+        if ours is None:
+            status, out = call(token, "POST", f"/v1/business-policies/{key}/versions", {
+                "key": key, "document": json.dumps(policy["document"], ensure_ascii=False), "reason": POLICY_REASON})
+            if status >= 300:
+                print(f"  warn  business policy {key}: not proposed: {status} {out.get('message', out)}")
+                continue
+            ours = out
+        number = ours.get("number")
+        status, out = call(token, "POST", f"/v1/business-policies/{key}/versions/{number}:approve",
+                           {"key": key, "number": number, "note": POLICY_REASON})
+        if status >= 300:
+            print(f"  warn  business policy {key}: version {number} not approved: {status} {out.get('message', out)}"
+                  " (is KULOFFICE_APPROVALS_SINGLE_OPERATOR=true?)")
+            continue
+        approved.append(key)
+    print(f"  ok  business policies: {len(approved)} approved now ({', '.join(approved) or 'none'}), {len(kept)} already in force")
+    return approved
+
+
+def main():
+    with open(TEXTS, encoding="utf-8") as f:
+        texts = json.load(f)
+    with open(POLICIES, encoding="utf-8") as f:
+        policies = json.load(f)
+    token = sign_in()
+    seed_texts(token, texts)
+    seed_policies(token, policies)
 
 
 if __name__ == "__main__":

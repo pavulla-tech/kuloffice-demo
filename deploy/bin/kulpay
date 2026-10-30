@@ -513,10 +513,10 @@ dev_admin() {
     -e STAFF_FIRST_NAME=Developers -e STAFF_LAST_NAME=Pavulla -e KULOFFICE_ROLE=ADMIN -e SOLANGE_ROLES=admin -e GATEWAY_OPERATOR=1 \
     tools /tools/operator.sh || { say "warning: the development admin was not seeded (make operator to retry)"; return 0; }
   dev_claim_sends
-  say "development texts: the products' notification texts, where none is approved"
+  say "development texts and policies: the products' notification texts and example business policies, where none is approved"
   compose --profile tools run --rm --entrypoint python3 -e DEV_ADMIN_EMAIL="$email" -e DEV_ADMIN_PASSWORD="$pw" \
     -e WORKFORCE_ISSUER="$(env_get KEYCLOAK_PUBLIC_URL)/realms/$(env_get WORKFORCE_REALM || echo workforce)" \
-    tools /tools/dev_rules.py || say "warning: the development texts were not seeded (bin/kulpay provision to retry)"
+    tools /tools/dev_rules.py || say "warning: the development texts and policies were not seeded (bin/kulpay provision to retry)"
 }
 
 # Development stacks: sends to numbers without an account, on. The hold
