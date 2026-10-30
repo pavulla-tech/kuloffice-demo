@@ -135,5 +135,78 @@ class SeedQRTemplateTest(unittest.TestCase):
         self.assertFalse(any(c[1] == "POST" for c in fake.calls))
 
 
+
+class FakeReceiptQR:
+    def __init__(self, chosen="", templates=(), solange=(), receipt=True):
+        self.chosen, self.templates, self.solange, self.receipt = chosen, list(templates), list(solange), receipt
+        self.calls = []
+
+    def __call__(self, token, method, path, body=None, base=None):
+        self.calls.append((token, method, path, body))
+        if path == "/v1/workforce/qr/templates":
+            out = {"templates": [{"id": t} for t in self.templates], "general": {"template_id": "tpl_general"}}
+            if self.receipt:
+                out["receipt"] = {"template_id": self.chosen, "fallback_template_id": "tpl_general"}
+            return 200, out
+        if path == "/staff/v1/templates" and method == "GET":
+            return 200, {"data": self.solange}
+        if path == "/staff/v1/logos" and method == "POST":
+            return 201, {"logo": {"id": "logo_receipt"}}
+        if path == "/staff/v1/templates" and method == "POST":
+            return 201, {"decodes": True, "template": {"id": "tpl_receipts", "name": body["name"]}}
+        if path == "/v1/workforce/qr/receipt-template":
+            self.chosen = body["template_id"]
+            return 200, {"template_id": self.chosen}
+        raise AssertionError((method, path))
+
+    def upload(self, token, path, data, content_type, base=None):
+        return self(token, "POST", path, {"bytes": len(data), "content_type": content_type})
+
+
+class SeedReceiptTemplateTest(unittest.TestCase):
+    def setUp(self):
+        rules.CONSOLE_URL = "https://console.example.test"
+
+    def seed(self, fake):
+        rules.call, rules.upload = fake, fake.upload
+        with contextlib.redirect_stdout(io.StringIO()):
+            return rules.seed_receipt_template("ko-token", lambda: "staff-token")
+
+    def test_an_operators_choice_is_kept(self):
+        fake = FakeReceiptQR(chosen="tpl_owner", templates=["tpl_general", "tpl_owner"])
+        self.assertEqual(self.seed(fake), "")
+        self.assertEqual([c[2] for c in fake.calls], ["/v1/workforce/qr/templates"])
+
+    def test_without_a_choice_the_black_receipt_template_is_made_with_its_logo_and_chosen(self):
+        fake = FakeReceiptQR(templates=["tpl_general"])
+        self.assertEqual(self.seed(fake), "tpl_receipts")
+        logo = next(c for c in fake.calls if c[2] == "/staff/v1/logos")
+        self.assertEqual((logo[0], logo[3]["content_type"]), ("staff-token", "image/png"))
+        self.assertGreater(logo[3]["bytes"], 0)
+        post = next(c for c in fake.calls if c[1] == "POST" and c[2] == "/staff/v1/templates")[3]
+        self.assertEqual((post["name"], post["centre"], post["logo"]), ("KulPay recibos (dev)", "logo", "logo_receipt"))
+        self.assertEqual({post["fg"], post["eye"], post["style"]["eye_frame_colour"]}, {"#000000"})
+        self.assertEqual(post["bg"], "#FFFFFF")
+        put = fake.calls[-1]
+        self.assertEqual((put[0], put[2], put[3]["template_id"]), ("ko-token", "/v1/workforce/qr/receipt-template", "tpl_receipts"))
+        self.assertEqual(fake.chosen, "tpl_receipts")
+
+    def test_a_receipt_template_already_in_solange_is_reused_without_a_new_logo(self):
+        fake = FakeReceiptQR(chosen="tpl_wiped", templates=["tpl_general", "tpl_r"], solange=[{"id": "tpl_r", "name": "KulPay recibos (dev)"}])
+        self.assertEqual(self.seed(fake), "tpl_r")
+        self.assertFalse(any(c[1] == "POST" for c in fake.calls))
+
+    def test_an_older_kulOffice_without_receipt_templates_is_left_alone(self):
+        fake = FakeReceiptQR(templates=["tpl_general"], receipt=False)
+        self.assertEqual(self.seed(fake), "")
+        self.assertEqual(len(fake.calls), 1)
+
+    def test_the_receipt_logo_is_a_square_png(self):
+        with open(rules.QR_RECEIPT_LOGO, "rb") as f:
+            head = f.read(24)
+        self.assertEqual(head[:8], b"\x89PNG\r\n\x1a\n")
+        self.assertEqual(int.from_bytes(head[16:20], "big"), int.from_bytes(head[20:24], "big"), "a square image (the circle)")
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -505,6 +505,13 @@ the development admin and runs `tools/dev_rules.py`:
   palette) is made in Solange through its staff API, signed in to the
   `solange-console` client as the same admin, unless one of that name is there,
   and chosen as the general template. An operator's choice is never changed.
+- likewise, when the back office has no QR receipt template (printed receipts:
+  the KulPay POS prints in black only), `tools/qr_receipt_logo.png` (the KulPay
+  mark in white on a black circle) is uploaded as a Solange logo and the template
+  `KulPay recibos (dev)` (black square modules and eyes on white, that logo in
+  the centre) is made, unless one of that name is there, and chosen as the
+  receipt template (Códigos QR → Modelo dos recibos). An operator's choice is
+  never changed.
 
 Texts and policies need `KULOFFICE_APPROVALS_SINGLE_OPERATOR=true` (one operator decides on
 dev). `tools/dev_policies_check/check.sh <KulOffice checkout>` proves every

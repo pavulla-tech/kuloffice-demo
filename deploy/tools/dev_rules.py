@@ -22,6 +22,14 @@ client as the same admin, creates the template "KulPay (dev)" in Solange's
 staff API unless a template of that name is there, and makes it the back
 office's general template (Códigos QR → Modelo geral). A choice an operator
 made is never changed.
+
+Likewise the receipt template (printed receipts: the KulPay POS prints in
+black only): when none is chosen (or it is gone from Solange), it uploads
+qr_receipt_logo.png (the KulPay mark in white on a black circle) as a Solange
+logo, creates "KulPay recibos (dev)" (black square modules and eyes on white,
+that logo in the centre) unless a template of that name is there, and makes it
+the receipt template (Códigos QR → Modelo dos recibos). An operator's choice
+is never changed.
 """
 import base64
 import hashlib
@@ -55,6 +63,16 @@ QR_TEMPLATE = {
     "centre": "subject_icon", "error_correction": "Q", "frame_text": "Leia para pagar",
     "style": {"eye_frame": "rounded", "eye_ball": "dot", "frame": "badge", "frame_colour": "#002F34",
               "frame_text_colour": "#9AE665", "frame_icon": "phone"},
+}
+
+QR_RECEIPT_NOTE = "development stack: KulPay recibos (dev) template (tools/dev_rules.py)"
+QR_RECEIPT_LOGO = os.path.join(os.path.dirname(os.path.abspath(__file__)), "qr_receipt_logo.png")
+# Printed receipts: all black on white, the mark white on a black circle (the
+# logo image carries the circle; Solange clears a white plate behind it).
+QR_RECEIPT_TEMPLATE = {
+    "name": "KulPay recibos (dev)", "modules": "square", "fg": "#000000", "bg": "#FFFFFF", "eye": "#000000",
+    "centre": "logo", "error_correction": "H",
+    "style": {"eye_frame": "square", "eye_ball": "square", "eye_frame_colour": "#000000", "frame": "none", "logo_size": 0.24},
 }
 
 
@@ -245,6 +263,85 @@ def seed_qr_template(token, solange_sign_in):
     return template["id"]
 
 
+def upload(token, path, data, content_type, base=SOLANGE):
+    """POSTs raw bytes (a logo) to Solange; (status, JSON)."""
+    req = urllib.request.Request(base + path, method="POST", data=data,
+                                 headers={"Authorization": "Bearer " + token, "Content-Type": content_type})
+    try:
+        with urllib.request.urlopen(req, timeout=30) as r:
+            raw = r.read()
+            return r.status, json.loads(raw) if raw else {}
+    except urllib.error.HTTPError as e:
+        raw = e.read().decode(errors="replace")
+        try:
+            return e.code, json.loads(raw)
+        except ValueError:
+            return e.code, {"message": raw[:300]}
+
+
+def seed_receipt_template(token, solange_sign_in):
+    """The back office's receipt QR template, when none is chosen: KulPay
+    recibos (dev), made in Solange if missing (with its logo). Returns the
+    template id set, or ""."""
+    where = "choose one in the back office (Códigos QR → Modelo dos recibos)"
+    status, out = call(token, "GET", "/v1/workforce/qr/templates")
+    if status != 200:
+        print(f"  warn  QR templates not listed: {status} {out.get('message', out)}")
+        return ""
+    if "receipt" not in out:
+        print("  note  QR receipt template: this KulOffice has none; skipped")
+        return ""
+    chosen = (out.get("receipt") or {}).get("template_id", "")
+    known = {t.get("id") for t in out.get("templates", [])}
+    if chosen and chosen in known:
+        print("  ok  QR receipt template: already chosen")
+        return ""
+    if not CONSOLE_URL:
+        print(f"  note  QR receipt template: SOLANGE_CONSOLE_PUBLIC_URL is empty; {where}")
+        return ""
+    try:
+        staff = solange_sign_in()
+    except SystemExit as error:
+        print(f"  warn  Solange console sign-in: {error}; {where}")
+        return ""
+    status, out = call(staff, "GET", "/staff/v1/templates", base=SOLANGE)
+    if status != 200:
+        print(f"  warn  Solange's templates not listed: {status} {out.get('message', out)}")
+        return ""
+    name = QR_RECEIPT_TEMPLATE["name"]
+    template = next((t for t in out.get("data", []) if t.get("name") == name), None)
+    if template is None:
+        with open(QR_RECEIPT_LOGO, "rb") as f:
+            status, out = upload(staff, "/staff/v1/logos", f.read(), "image/png")
+        if status >= 300:
+            print(f"  warn  Solange refused the receipt logo: {status} {out.get('message', out)}")
+            return ""
+        body = dict(QR_RECEIPT_TEMPLATE, logo=(out.get("logo") or {}).get("id", ""))
+        status, out = call(staff, "POST", "/staff/v1/templates", body, base=SOLANGE)
+        if status >= 300:
+            print(f"  warn  Solange refused the {name} template: {status} {out.get('message', out)}")
+            return ""
+        template = out.get("template") or {}
+        print(f"  ok  Solange template {name} created")
+    status, out = call(token, "PUT", "/v1/workforce/qr/receipt-template", {"template_id": template["id"], "note": QR_RECEIPT_NOTE})
+    if status >= 300:
+        print(f"  warn  QR receipt template not set: {status} {out.get('message', out)}")
+        return ""
+    print(f"  ok  QR receipt template: {name} ({template['id']})")
+    return template["id"]
+
+
+def once(fn):
+    """fn's result, computed on the first call only (one Solange sign-in)."""
+    memo = []
+
+    def wrapped():
+        if not memo:
+            memo.append(fn())
+        return memo[0]
+    return wrapped
+
+
 def main():
     with open(TEXTS, encoding="utf-8") as f:
         texts = json.load(f)
@@ -253,7 +350,9 @@ def main():
     token = sign_in()
     seed_texts(token, texts)
     seed_policies(token, policies)
-    seed_qr_template(token, lambda: sign_in(CONSOLE_CLIENT, CONSOLE_URL + "/api/auth/callback"))
+    solange_sign_in = once(lambda: sign_in(CONSOLE_CLIENT, CONSOLE_URL + "/api/auth/callback"))
+    seed_qr_template(token, solange_sign_in)
+    seed_receipt_template(token, solange_sign_in)
 
 
 if __name__ == "__main__":
