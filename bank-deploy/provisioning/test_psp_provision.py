@@ -86,6 +86,72 @@ class PSPProvisionTests(unittest.TestCase):
             self.assertEqual(json.loads((Path(directory) / "readiness-report.json").read_text())["outcome"],
                              "pilot_suspended")
 
+    def forgetful_gateway(self, known):
+        class Gateway:
+            def __init__(self):
+                self.calls = []
+
+            def call(self, method, path, body=None, **_kwargs):
+                self.calls.append((method, path))
+                psp_id = path.rsplit("/", 1)[-1]
+                if method == "GET" and path.startswith("/admin/psps/"):
+                    if psp_id in known:
+                        return 200, {"psp": {"id": psp_id, "status": "pilot"}}, {}
+                    raise psp.ProvisionError(f"GET {path} failed: HTTP 404: not found")
+                raise AssertionError((method, path))
+        return Gateway()
+
+    def test_a_psp_the_gateway_forgot_starts_over_with_the_old_output_aside(self):
+        with tempfile.TemporaryDirectory() as directory:
+            out = Path(directory)
+            psp.atomic_json(out / "state.json", {"psp_id": "psp-old"})
+            psp.atomic_json(out / "secrets.json", {"application_draft_token": "old-token"})
+            (out / "readiness-report.json").write_text("{}")
+            provisioner = psp.Provisioner({"partner": {"short_name": "SIMBANK"}}, out)
+            provisioner.admin = self.forgetful_gateway(known=())
+            self.assertTrue(provisioner.start_over_if_forgotten())
+            self.assertEqual((provisioner.state, provisioner.secret_values), ({}, {}))
+            aside = [p for p in out.iterdir() if p.name.startswith("before-reset-")]
+            self.assertEqual(len(aside), 1)
+            self.assertEqual(sorted(p.name for p in aside[0].iterdir()), ["readiness-report.json", "secrets.json", "state.json"])
+            self.assertEqual(json.loads((aside[0] / "state.json").read_text()), {"psp_id": "psp-old"})
+            self.assertEqual(stat.S_IMODE(aside[0].stat().st_mode), 0o700)
+            self.assertFalse((out / "state.json").exists())
+
+    def test_a_psp_the_gateway_still_has_is_resumed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            out = Path(directory)
+            psp.atomic_json(out / "state.json", {"psp_id": "psp-1"})
+            provisioner = psp.Provisioner({"partner": {"short_name": "SIMBANK"}}, out)
+            provisioner.admin = self.forgetful_gateway(known=("psp-1",))
+            self.assertFalse(provisioner.start_over_if_forgotten())
+            self.assertEqual(provisioner.state, {"psp_id": "psp-1"})
+            self.assertTrue((out / "state.json").exists())
+
+    def test_plan_only_says_it_would_start_over(self):
+        with tempfile.TemporaryDirectory() as directory:
+            out = Path(directory)
+            psp.atomic_json(out / "state.json", {"psp_id": "psp-old"})
+            provisioner = psp.Provisioner({"partner": {"short_name": "SIMBANK"}}, out, dry_run=True)
+            provisioner.admin = self.forgetful_gateway(known=())
+            self.assertFalse(provisioner.start_over_if_forgotten())
+            self.assertEqual(provisioner.state, {"psp_id": "psp-old"})
+            self.assertEqual([p.name for p in out.iterdir()], ["state.json"])
+
+    def test_another_gateway_error_is_not_a_reset(self):
+        with tempfile.TemporaryDirectory() as directory:
+            out = Path(directory)
+            psp.atomic_json(out / "state.json", {"psp_id": "psp-1"})
+            provisioner = psp.Provisioner({"partner": {"short_name": "SIMBANK"}}, out)
+
+            class Down:
+                def call(self, method, path, body=None, **_kwargs):
+                    raise psp.ProvisionError(f"GET {path} failed: HTTP 502: bad gateway")
+            provisioner.admin = Down()
+            with self.assertRaises(psp.ProvisionError):
+                provisioner.start_over_if_forgotten()
+            self.assertTrue((out / "state.json").exists())
+
     def test_atomic_json_is_private(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "secrets.json"

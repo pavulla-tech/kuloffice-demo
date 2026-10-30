@@ -613,6 +613,33 @@ class Provisioner:
             "language": nested(self.config, "deployment.language", "pt"),
         }
 
+    def start_over_if_forgotten(self) -> bool:
+        """A Gateway reset forgets the PSP that state.json names: every later
+        call would 404. The old output (state, one-time secrets, report) is
+        moved aside into before-reset-<UTC time>/ in the output directory and
+        provisioning starts again from nothing. Returns True when it did."""
+        psp_id = self.state.get("psp_id")
+        if not psp_id:
+            return False
+        try:
+            self.admin.call("GET", f"/admin/psps/{psp_id}")
+            return False
+        except ProvisionError as error:
+            if "failed: HTTP 404" not in str(error):
+                raise
+        if self.dry_run:
+            self.step(f"the Gateway no longer has {self.name}'s PSP {psp_id}: apply starts over (old output kept aside)")
+            return False
+        aside = self.output / ("before-reset-" + dt.datetime.now(dt.timezone.utc).strftime("%Y%m%dT%H%M%SZ"))
+        aside.mkdir(mode=0o700)
+        for entry in list(self.output.iterdir()):
+            if entry.name.startswith("before-reset-"):
+                continue
+            os.replace(entry, aside / entry.name)
+        log(f"== the Gateway no longer has {self.name}'s PSP {psp_id} (reset?): old output moved to {aside.name}/, starting over")
+        self.state, self.secret_values = {}, {}
+        return True
+
     def ensure_application(self) -> None:
         self.step(f"create or resume {self.name} PSP application")
         if self.dry_run:
@@ -1312,6 +1339,7 @@ class Provisioner:
 
     def apply(self) -> int:
         self.require_runtime()
+        self.start_over_if_forgotten()
         self.verify_launch_matrix()
         self.ensure_users()
         self.ensure_test_business()
@@ -1338,6 +1366,7 @@ class Provisioner:
 
     def plan(self) -> int:
         self.require_runtime()
+        self.start_over_if_forgotten()
         _, matrix, _ = self.admin.call("GET", "/admin/launch-matrix")
         missing = missing_routes(matrix, launch_routes(self.config))
         if missing:
