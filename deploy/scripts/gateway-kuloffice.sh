@@ -19,6 +19,19 @@ set_env() {
   rm -f "$tmp"
 }
 
+# Development stacks (DEV_ADMIN_EMAIL set in .env; dev: nothing off): billers
+# are provisioned at the Gateway and incoming transfers are on, as
+# make cash-deposits and make gateway-billers would set, so a reset needs no
+# hand step. GATEWAY_BILLER_PROVISIONING=0 still leaves the billers' half out.
+if grep -q '^DEV_ADMIN_EMAIL=.' "$env_file"; then
+  : "${GATEWAY_BILLER_PROVISIONING:=1}"
+  if ! grep -q '^KULOFFICE_INCOMING_TRANSFERS_ENABLED=true' "$env_file"; then
+    set_env KULOFFICE_INCOMING_TRANSFERS_ENABLED true
+    echo "Incoming transfers switched on in $env_file (development stack)"
+  fi
+fi
+[ "${GATEWAY_BILLER_PROVISIONING:-}" = "0" ] && GATEWAY_BILLER_PROVISIONING=
+
 # The tools image's entrypoint is sh, so python3 is the entrypoint here.
 result=$($COMPOSE --profile tools run --rm -e GATEWAY_CASH_IN_INCOMING="${GATEWAY_CASH_IN_INCOMING:-}" \
   -e GATEWAY_BILLER_PROVISIONING="${GATEWAY_BILLER_PROVISIONING:-}" --entrypoint python3 tools /tools/gateway_kuloffice.py)

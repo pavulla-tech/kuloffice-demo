@@ -435,6 +435,16 @@ KulOffice is recreated. If an endpoint exists but `.env` lost its secret, the
 command rotates that secret with a 24-hour grace period. The deployment tool's
 `bin/kulpay provision` action includes this step.
 
+With `GATEWAY_BILLER_PROVISIONING=1` (`make gateway-billers`) it also keeps
+KulOffice's partners key (`KULOFFICE_BILLER_PROVISIONING_GATEWAY_API_KEY`): a key
+already in `.env` is checked with `GET /v1/me` and kept only while the Gateway
+still knows it with `service:partners:write`; after a Gateway reset it answers
+401 and a new key is issued into `.env` (never printed). On a development stack
+(`DEV_ADMIN_EMAIL` set) that half always runs, and
+`KULOFFICE_INCOMING_TRANSFERS_ENABLED` and `KULOFFICE_BILLER_PROVISIONING_ENABLED`
+are set to `true` (dev: nothing off); `GATEWAY_BILLER_PROVISIONING=0` leaves the
+billers out.
+
 KulPay's own purchases (a business bill paid on its Gateway invoice link, a
 recharge) can be paid with the KulPay wallet at the Gateway's hosted checkout:
 

@@ -39,7 +39,11 @@ CASH_IN_INCOMING = os.environ.get("GATEWAY_CASH_IN_INCOMING", "").strip() != "0"
 # KulOffice provisions approved billers with (service:partners:write, an
 # operator-only scope, issued by the admin key on KulOffice's own account).
 BILLER_PROVISIONING = os.environ.get("GATEWAY_BILLER_PROVISIONING", "") == "1"
-HAVE_PARTNERS_KEY = bool(os.environ.get("KULOFFICE_BILLER_PROVISIONING_GATEWAY_API_KEY", "").strip())
+# The key already in .env is kept only while the Gateway still knows it: a
+# Gateway reset forgets every account key, and the old one would then fail
+# every provisioning with 401. Checked with GET /v1/me (no scope needed).
+PARTNERS_KEY = os.environ.get("KULOFFICE_BILLER_PROVISIONING_GATEWAY_API_KEY", "").strip()
+PARTNERS_SCOPE = "service:partners:write"
 # KulOffice's own biller: businesses' bills and payment requests are
 # presented at the Gateway under it (BillerByTenant on KulOffice's account);
 # without it POST /v1/biller/invoices answers 403 not_a_biller. A Gateway
@@ -207,18 +211,36 @@ def ensure_cash_in_incoming():
     print("cash deposits for KulOffice's references are recorded as incoming transfers", file=sys.stderr)
 
 
+def partners_key_known(key):
+    """True when the Gateway still authenticates the key with the partners
+    scope; False when it answers 401/403 (a reset forgot it) or the key lost
+    the scope. Anything else is an error. The key is never printed."""
+    try:
+        _, me = request("GET", "/me", key)
+    except RuntimeError as error:
+        text = str(error)
+        if "failed: 401 " in text or "failed: 403 " in text:
+            return False
+        raise RuntimeError("GET /me with the partners key failed: " + text.split(" failed: ", 1)[-1][:3]) from None
+    me = me or {}
+    return bool(me.get("authenticated")) and PARTNERS_SCOPE in (me.get("scopes") or [])
+
+
 def ensure_partners_key():
-    """Issues KulOffice's partners key once; an existing one is kept."""
-    if HAVE_PARTNERS_KEY:
-        print("partners key already set", file=sys.stderr)
-        return ""
+    """KulOffice's partners key: kept while the Gateway knows it, issued
+    again when it does not (a Gateway reset)."""
+    if PARTNERS_KEY:
+        if partners_key_known(PARTNERS_KEY):
+            print("partners key already set and known to the Gateway", file=sys.stderr)
+            return ""
+        print("partners key in .env is unknown to the Gateway (reset?): issuing another", file=sys.stderr)
     if not ACCOUNT_ID:
         raise RuntimeError("GATEWAY_ACCOUNT_ID is required to issue the partners key")
     _, created = request(
         "POST",
         f"/admin/accounts/{ACCOUNT_ID}/keys",
         ADMIN_KEY,
-        {"name": "kuloffice-partners", "scopes": ["service:partners:write"]},
+        {"name": "kuloffice-partners", "scopes": [PARTNERS_SCOPE]},
     )
     key = created.get("key", {}) if isinstance(created, dict) else {}
     secret = key.get("secret", "")

@@ -17,7 +17,8 @@ INVOICE_PRODUCT = {"code": "FATURA", "amount_rule": "presented", "enabled": True
 
 
 class FakeGateway:
-    def __init__(self, incoming=None, sink=None, biller=ACTIVE_BILLER, approvals=(), products=(INVOICE_PRODUCT,)):
+    def __init__(self, incoming=None, sink=None, biller=ACTIVE_BILLER, approvals=(), products=(INVOICE_PRODUCT,), known_keys=()):
+        self.known_keys = dict(known_keys)
         self.incoming = incoming
         self.sink = sink
         self.biller = dict(biller) if biller else None
@@ -27,6 +28,10 @@ class FakeGateway:
 
     def __call__(self, method, path, key, body=None):
         self.calls.append((method, path, key, body))
+        if method == "GET" and path == "/me":
+            if key not in self.known_keys:
+                raise RuntimeError('GET /me failed: 401 {"error":"unauthorized"}')
+            return 200, {"authenticated": True, "scopes": self.known_keys[key]}
         if method == "GET" and path == "/webhook-endpoints":
             return 200, {"data": [self.incoming] if self.incoming else []}
         if method == "POST" and path == "/webhook-endpoints":
@@ -201,7 +206,7 @@ class PartnersKeyTest(unittest.TestCase):
         return stdout.getvalue(), stderr.getvalue()
 
     def test_issues_the_partners_key_once_on_kuloffices_account(self):
-        gateway.BILLER_PROVISIONING, gateway.HAVE_PARTNERS_KEY = True, False
+        gateway.BILLER_PROVISIONING, gateway.PARTNERS_KEY = True, ""
         fake = FakeGateway(
             incoming={"id": "wh_1", "mode": "live", "url": gateway.URL, "status": "active", "event_types": ["*"]},
             sink={"id": "sink_1", "mode": "live", "url": gateway.URL, "enabled": True, "event_types": ["payment.*"]},
@@ -213,17 +218,51 @@ class PartnersKeyTest(unittest.TestCase):
         self.assertEqual(issued[2], "admin-key")
         self.assertEqual(issued[3]["scopes"], ["service:partners:write"])
 
-        gateway.HAVE_PARTNERS_KEY = True
+        gateway.PARTNERS_KEY = "partners-new"
         fake = FakeGateway(
             incoming={"id": "wh_1", "mode": "live", "url": gateway.URL, "status": "active", "event_types": ["*"]},
             sink={"id": "sink_1", "mode": "live", "url": gateway.URL, "enabled": True, "event_types": ["payment.*"]},
+            known_keys={"partners-new": ["service:partners:write"]},
         )
         stdout, _ = self.run_main(fake)
         self.assertEqual(stdout, "")
         self.assertFalse(any(c[1].startswith("/admin/accounts/") and c[1].endswith("/keys") for c in fake.calls))
 
+    def test_a_partners_key_the_gateway_forgot_is_issued_again(self):
+        gateway.BILLER_PROVISIONING, gateway.PARTNERS_KEY = True, "partners-before-reset"
+        fake = FakeGateway(
+            incoming={"id": "wh_1", "mode": "live", "url": gateway.URL, "status": "active", "event_types": ["*"]},
+            sink={"id": "sink_1", "mode": "live", "url": gateway.URL, "enabled": True, "event_types": ["payment.*"]},
+        )
+        stdout, stderr = self.run_main(fake)
+        self.assertEqual(stdout.splitlines(), ["KULOFFICE_BILLER_PROVISIONING_GATEWAY_API_KEY=partners-new"])
+        self.assertIn("unknown to the Gateway", stderr)
+        self.assertNotIn("partners-before-reset", stderr + stdout)
+        self.assertNotIn("partners-new", stderr)
+        me = next(c for c in fake.calls if c[1] == "/me")
+        self.assertEqual(me[2], "partners-before-reset")
+
+    def test_a_partners_key_without_its_scope_is_issued_again(self):
+        gateway.BILLER_PROVISIONING, gateway.PARTNERS_KEY = True, "partners-narrow"
+        fake = FakeGateway(
+            incoming={"id": "wh_1", "mode": "live", "url": gateway.URL, "status": "active", "event_types": ["*"]},
+            sink={"id": "sink_1", "mode": "live", "url": gateway.URL, "enabled": True, "event_types": ["payment.*"]},
+            known_keys={"partners-narrow": ["payments:read"]},
+        )
+        stdout, _ = self.run_main(fake)
+        self.assertEqual(stdout.splitlines(), ["KULOFFICE_BILLER_PROVISIONING_GATEWAY_API_KEY=partners-new"])
+
+    def test_a_gateway_error_on_the_check_fails_without_issuing(self):
+        gateway.BILLER_PROVISIONING, gateway.PARTNERS_KEY = True, "partners-old"
+        def broken(method, path, key, body=None):
+            raise RuntimeError("GET /me failed: 502 bad gateway partners-old")
+        gateway.request = broken
+        with self.assertRaises(RuntimeError) as caught:
+            gateway.ensure_partners_key()
+        self.assertNotIn("partners-old", str(caught.exception))
+
     def tearDown(self):
-        gateway.BILLER_PROVISIONING, gateway.HAVE_PARTNERS_KEY = False, False
+        gateway.BILLER_PROVISIONING, gateway.PARTNERS_KEY = False, ""
 
 
 class KulOfficeBillerTest(unittest.TestCase):
