@@ -463,6 +463,8 @@ refund moves it back. No merchant and no pricing plan: the Gateway's fees are
 already in the checkout total. Safe to repeat. It needs a KulOffice image with
 the platform checkout (`claude/platform-wallet`); before that KulOffice
 refuses the binding's authorizations.
+`bin/kulpay provision` writes it too, so a Gateway reset followed by provision
+needs no hand step.
 
 Incoming transfers, supply, Payment Acceptance and reconciliation remain off
 by default. Enable them in that order after each smoke test. Supply must not be

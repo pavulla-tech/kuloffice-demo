@@ -9,7 +9,7 @@
 #   kulpay health   [unit]                       check running units
 #   kulpay backup   <database>                   a backup now
 #   kulpay restore  <database> <file> --yes      replace a database
-#   kulpay provision                             init, Gateway events, then QR codes (idempotent)
+#   kulpay provision                             init, Gateway events and platform wallet, QR codes, dev seeds (idempotent)
 #   kulpay secrets                               generate the missing generated values into .env
 #   kulpay operator-roles [grant ROLE...]        list operator roles; give a role every permission
 #
@@ -728,6 +728,15 @@ cmd_health() {
   return $bad
 }
 
+# KulPay balance at the Gateway's checkout for KulPay's own purchases (make
+# platform-wallet): one live kulpay_balance binding on the platform account.
+# The Gateway upserts it, so repeating is harmless; a Gateway reset loses it.
+platform_wallet() {
+  say "Gateway: KulPay balance at the checkout for KulPay's own purchases (platform-wallet)"
+  compose --profile tools run --rm --entrypoint python3 -e BINDING_MODE=platform tools /tools/merchant_bindings.py ||
+    say "warning: the platform's KulPay balance binding was not written (make platform-wallet to retry)"
+}
+
 # The stack's own setup, safe to repeat: realms, clients, the kuloffice
 # license and identity providers (make init: an existing realm is left
 # alone), then KulPay's app, key and webhook in Solange (make solange-kulpay:
@@ -739,6 +748,7 @@ cmd_provision() {
   compose --profile tools run --rm tools /tools/init.sh
   say "Gateway: incoming-transfer endpoint and platform payment-event sink"
   ENV_FILE=$ENV_FILE COMPOSE="docker compose --env-file $ENV_FILE" sh scripts/gateway-kuloffice.sh
+  platform_wallet
   say "QR codes: KulPay in Solange, kuloffice's key and webhook"
   ENV_FILE=$ENV_FILE COMPOSE="docker compose --env-file $ENV_FILE" sh scripts/solange-kulpay.sh
   check_unit kuloffice
