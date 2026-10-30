@@ -88,5 +88,52 @@ class SeedPoliciesTest(unittest.TestCase):
                                      "agents", "devices", "vaquinha", "budgets", "notifications"})
 
 
+class FakeQR:
+    def __init__(self, chosen="", templates=(), solange=()):
+        self.chosen, self.templates, self.solange = chosen, list(templates), list(solange)
+        self.calls = []
+
+    def __call__(self, token, method, path, body=None, base=None):
+        self.calls.append((token, method, path, body))
+        if path == "/v1/workforce/qr/templates":
+            return 200, {"templates": [{"id": t} for t in self.templates], "general": {"template_id": self.chosen}}
+        if path == "/staff/v1/templates" and method == "GET":
+            return 200, {"data": self.solange}
+        if path == "/staff/v1/templates" and method == "POST":
+            return 201, {"decodes": True, "template": {"id": "tpl_new", "name": body["name"]}}
+        if path == "/v1/workforce/qr/general-template":
+            self.chosen = body["template_id"]
+            return 200, {"template_id": self.chosen}
+        raise AssertionError((method, path))
+
+
+class SeedQRTemplateTest(unittest.TestCase):
+    def setUp(self):
+        rules.CONSOLE_URL = "https://console.example.test"
+
+    def seed(self, fake):
+        rules.call = fake
+        with contextlib.redirect_stdout(io.StringIO()):
+            return rules.seed_qr_template("ko-token", lambda: "staff-token")
+
+    def test_an_operators_choice_is_kept(self):
+        fake = FakeQR(chosen="tpl_owner", templates=["tpl_default", "tpl_owner"])
+        self.assertEqual(self.seed(fake), "")
+        self.assertEqual([c[2] for c in fake.calls], ["/v1/workforce/qr/templates"])
+
+    def test_without_a_choice_the_dev_template_is_made_and_chosen(self):
+        fake = FakeQR(templates=["tpl_default"])
+        self.assertEqual(self.seed(fake), "tpl_new")
+        post = next(c for c in fake.calls if c[1] == "POST")
+        self.assertEqual((post[0], post[3]["name"]), ("staff-token", "KulPay (dev)"))
+        put = fake.calls[-1]
+        self.assertEqual((put[0], put[3]["template_id"]), ("ko-token", "tpl_new"))
+
+    def test_a_dev_template_already_in_solange_is_reused(self):
+        fake = FakeQR(chosen="tpl_wiped", templates=["tpl_default", "tpl_kp"], solange=[{"id": "tpl_kp", "name": "KulPay (dev)"}])
+        self.assertEqual(self.seed(fake), "tpl_kp")
+        self.assertFalse(any(c[1] == "POST" for c in fake.calls))
+
+
 if __name__ == "__main__":
     unittest.main()

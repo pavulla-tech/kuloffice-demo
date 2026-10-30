@@ -481,7 +481,13 @@ the development admin and runs `tools/dev_rules.py`:
   an existing policy (for example `merchant_collections` with only `online_shop`)
   propose a new version in the back office.
 
-Both need `KULOFFICE_APPROVALS_SINGLE_OPERATOR=true` (one operator decides on
+- when the back office has no QR general template (or the one chosen is gone from
+  Solange), the template `KulPay (dev)` (the console's KulPay preset in the logo's
+  palette) is made in Solange through its staff API, signed in to the
+  `solange-console` client as the same admin, unless one of that name is there,
+  and chosen as the general template. An operator's choice is never changed.
+
+Texts and policies need `KULOFFICE_APPROVALS_SINGLE_OPERATOR=true` (one operator decides on
 dev). `tools/dev_policies_check/check.sh <KulOffice checkout>` proves every
 policy document passes KulOffice's own validators (`go test -overlay`; nothing
 is written in the checkout). Run it when KulOffice changes a policy's shape.
