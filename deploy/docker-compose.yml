@@ -599,6 +599,8 @@ services:
       # Browser origins allowed to call KulOffice (KO-10, owner 2026-10-12):
       # the web app and kulportal. The mobile app is native and needs none.
       KULOFFICE_SERVER_HTTP_CORS_ALLOWED_ORIGINS: ${WEB_PUBLIC_URL},${KULPORTAL_PUBLIC_URL:-https://portal.kulpay.pavulla.com}
+      # The web app's /c/<reference> page: a store's and a cashier's QR pay through it (empty: not payable).
+      KULOFFICE_MERCHANT_COLLECTIONS_PUBLIC_BASE_URL: ${KULOFFICE_MERCHANT_COLLECTIONS_PUBLIC_BASE_URL:-${WEB_PUBLIC_URL}}
       KULOFFICE_SERVER_HTTP_PORT: "8080"
       KULOFFICE_SERVER_GRPC_PORT: "50051"
       KULOFFICE_SERVER_GRPC_MAX_RECV_MSG_SIZE: "20971520"
