@@ -46,6 +46,12 @@
     {"event": "business_plan.change_submitted", "channel": "inbox", "text": "Recebemos o pedido para passar ao plano {plan}. Mantém o plano {current_plan} até à decisão."},
     {"event": "business_plan.change_approved", "channel": "inbox", "text": "O seu negócio passou ao plano {plan}. Os novos limites já se aplicam."},
     {"event": "business_plan.change_rejected", "channel": "inbox", "text": "O pedido para passar ao plano {plan} não foi aprovado: {note}"},
-    {"event": "business_plan.change_cancelled", "channel": "inbox", "text": "O pedido para passar ao plano {plan} foi cancelado."}
+    {"event": "business_plan.change_cancelled", "channel": "inbox", "text": "O pedido para passar ao plano {plan} foi cancelado."},
+
+    {"event": "agent.application_received", "channel": "sms", "text": "Confirmado: recebemos a candidatura de {name} a Agente Kul. Vamos analisá-la e dar notícias."},
+    {"event": "agent.more_info", "channel": "sms", "text": "KulPay: a candidatura de {name} a Agente Kul precisa de mais informação: {reason}. Abra a aplicação KulPay para responder."},
+    {"event": "agent.approved", "channel": "sms", "text": "Confirmado: {name} foi aprovado como Agente Kul ({level}). Segue-se o contrato e a formação."},
+    {"event": "agent.rejected", "channel": "sms", "text": "Confirmado: a candidatura de {name} a Agente Kul não foi aprovada: {reason}."},
+    {"event": "agent.operator_code", "channel": "sms", "text": "KulPay: o seu código de operador de {name} é {code}. Válido 10 minutos. Não o partilhe com ninguém."}
   ]
 }
