@@ -737,6 +737,35 @@ platform_wallet() {
     say "warning: the platform's KulPay balance binding was not written (make platform-wallet to retry)"
 }
 
+# A development stack: DEV_ADMIN_EMAIL set (empty in production).
+is_dev() { [[ -n $(env_get DEV_ADMIN_EMAIL || true) ]]; }
+
+# Development stacks: the PSP simulator as a certified partner bank (make
+# simulator-bank), so bank cash deposits work after a Gateway reset. It
+# resumes where it stopped, and starts over (old output kept aside) when the
+# Gateway no longer has the PSP. After a reset it runs the certification
+# (a few minutes). Skipped when the simulator is not running, or with
+# DEV_SIMULATOR_BANK=0 in .env; a failure only warns.
+dev_simulator_bank() {
+  is_dev || return 0
+  if [[ $(env_get DEV_SIMULATOR_BANK || true) == 0 ]]; then say "simulator bank: skipped (DEV_SIMULATOR_BANK=0)"; return 0; fi
+  [[ -n $(compose ps -q simulator 2> /dev/null) ]] || { say "simulator bank: the simulator is not running; skipped"; return 0; }
+  [[ -f ../bank-deploy/provisioning/psp_provision.py ]] || { say "simulator bank: ../bank-deploy is missing; skipped"; return 0; }
+  command -v make > /dev/null || { say "warning: make is not installed; run make simulator-bank by hand"; return 0; }
+  say "development: the PSP simulator as a partner bank (make simulator-bank)"
+  make --no-print-directory -C "$DEPLOY_DIR" simulator-bank ENV_FILE="$ENV_FILE" ||
+    say "warning: the simulator bank is not ready (simulator-bank-output/readiness-report.json; make simulator-bank to resume)"
+}
+
+# Real M-Pesa and e-Mola are bound by hand in the Gateway dashboard (their
+# credentials never live in the kit): a warning when KulOffice's account has
+# no live binding for one of them.
+live_connectors() {
+  say "Gateway: live M-Pesa and e-Mola on KulOffice's account (set by hand)"
+  compose --profile tools run --rm --entrypoint python3 tools /tools/live_connectors.py ||
+    say "warning: the live connectors could not be checked"
+}
+
 # The stack's own setup, safe to repeat: realms, clients, the kuloffice
 # license and identity providers (make init: an existing realm is left
 # alone), then KulPay's app, key and webhook in Solange (make solange-kulpay:
@@ -753,10 +782,14 @@ cmd_provision() {
   ENV_FILE=$ENV_FILE COMPOSE="docker compose --env-file $ENV_FILE" sh scripts/solange-kulpay.sh
   check_unit kuloffice
   dev_admin
+  dev_simulator_bank
+  live_connectors
   echo
   echo "Configured. Still by hand (deploy/README.md):"
   [[ -n $(env_get PASSKEY_APP_ORIGINS || true) ]] || echo "  - PASSKEY_APP_ORIGINS is empty: passkeys from the mobile apps are refused"
   echo "  - staff accounts: make operator EMAIL=… FIRST=… LAST=…"
+  echo "  - real M-Pesa and e-Mola: Gateway dashboard, Connectors, live (kuloffice Manual 08 step 8)"
+  is_dev || echo "  - partner banks: make psp-provision PSP=<filled yaml>"
   echo "  - App Links: the mobile team's assetlinks.json and apple-app-site-association in /srv/kulpay/well-known/"
 }
 

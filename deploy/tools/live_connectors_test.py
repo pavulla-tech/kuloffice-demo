@@ -26,5 +26,12 @@ class LiveConnectorsTest(unittest.TestCase):
         self.assertIn("live mpesa is the PSP simulator's", found[0])
 
 
+    def test_the_simulators_methods_follow_compose(self):
+        self.assertEqual(live.simulated_methods(""), {"mpesa", "emola", "card"})
+        self.assertEqual(live.simulated_methods("card"), {"card"})
+        self.assertEqual(live.simulated_methods("mpesa, card"), {"mpesa", "card"})
+        self.assertEqual(live.simulated_methods("mpesa card"), {"mpesa", "card"})
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -33,5 +33,20 @@ class ProvisionTest(unittest.TestCase):
         self.assertIn("/tools/merchant_bindings.py", body)
 
 
+    def test_provision_ends_with_the_dev_seeds_the_simulator_bank_and_the_live_check(self):
+        self.assert_in_order(function("cmd_provision"), ["scripts/solange-kulpay.sh", "dev_admin", "dev_simulator_bank", "live_connectors"])
+
+    def test_the_simulator_bank_is_development_only_and_only_warns(self):
+        body = function("dev_simulator_bank")
+        self.assertTrue(body.lstrip().startswith("is_dev || return 0"))
+        self.assertIn("DEV_SIMULATOR_BANK", body)
+        self.assertIn("simulator-bank", body)
+        self.assertIn('say "warning: the simulator bank is not ready', body)
+        self.assertNotIn("die ", body)
+
+    def test_the_live_check_only_reads(self):
+        self.assertIn("/tools/live_connectors.py", function("live_connectors"))
+
+
 if __name__ == "__main__":
     unittest.main()

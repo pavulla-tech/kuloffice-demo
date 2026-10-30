@@ -45,8 +45,15 @@ def warnings(rows, simulated):
     return out
 
 
+def simulated_methods(value):
+    """What the simulator binds on every deploy: SIMULATOR_BIND_METHODS
+    (commas or spaces), and compose's default when it is empty."""
+    methods = {m for m in value.replace(",", " ").split() if m}
+    return methods or {"mpesa", "emola", "card"}
+
+
 def main():
-    simulated = {m.strip() for m in os.environ.get("SIMULATOR_BIND_METHODS", "").split(",") if m.strip()}
+    simulated = simulated_methods(os.environ.get("SIMULATOR_BIND_METHODS", ""))
     found = warnings(bindings(), simulated)
     for line in found:
         print("  " + line)

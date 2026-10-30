@@ -466,6 +466,25 @@ refuses the binding's authorizations.
 `bin/kulpay provision` writes it too, so a Gateway reset followed by provision
 needs no hand step.
 
+### What `bin/kulpay provision` restores after a reset
+
+In order, each step idempotent: the generated secrets; realms, clients, licence
+and identity providers (`init`); KulOffice's Gateway webhook, payment-event sink,
+biller `KULPAY` with `FATURA`, cash deposits as incoming transfers and, on dev,
+the partners key (checked, reissued when the Gateway forgot it) with biller
+provisioning and incoming transfers on (`gateway-kuloffice`); the platform's
+KulPay balance binding (`platform-wallet`); KulPay's app, key and webhook in
+Solange (`solange-kulpay`); on dev, the admin, claim sends, texts, business
+policies and the QR general template (below); on dev, the PSP simulator as a
+partner bank (`simulator-bank`, skipped with `DEV_SIMULATOR_BANK=0` or when the
+simulator is not running; it starts over by itself when the Gateway no longer
+has the PSP, keeping the old output in `simulator-bank-output/before-reset-*`);
+last, a warning when KulOffice's account has no live M-Pesa or e-Mola binding.
+Those two stay by hand in the Gateway dashboard (Connectors, live), since their
+credentials never live in the kit. Still by hand: other staff (`make operator`),
+billers and offerings, real partner banks (`make psp-provision`, which also
+starts over when its PSP is gone), merchants' bindings, business logos.
+
 ### Development seeds (texts and business policies)
 
 On a development stack (`DEV_ADMIN_EMAIL` and `DEV_ADMIN_PASSWORD` set), every
