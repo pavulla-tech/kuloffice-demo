@@ -235,7 +235,7 @@ class Run(unittest.TestCase):
         self.file = os.path.join(self.dir, "qa", "credentials.json")
         patches = [mock.patch.object(fx, "FILE", self.file), mock.patch.object(fx, "SLEEP", lambda s: None),
                    mock.patch.object(fx, "WARNINGS", []), mock.patch.object(fx, "admin_reviewer", lambda: fx.Reviewer("admin")),
-                   mock.patch.dict(os.environ, {"QA_FIXTURE_PHONES": ""})]
+                   mock.patch.dict(os.environ, {"QA_FIXTURE_PHONES": ",".join(PHONES)})]
         for p in patches:
             p.start()
             self.addCleanup(p.stop)

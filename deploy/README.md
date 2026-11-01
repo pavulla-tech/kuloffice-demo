@@ -544,9 +544,9 @@ repairs them at any time. It is safe to repeat: what exists is kept.
 | business `Loja Teste QA` | approved business (plan `pro`), Conta Pagamento with 30 000.00 MZN | the payer onboards it (`POST /v1/customers/{id}/business`, NUIT and registration documents, finish); the development admin approves |
 
 Names, emails (`example.test`) and document numbers are fake. The numbers are
-`+258840000101` to `…104` unless `QA_FIXTURE_PHONES` lists four others (in the
-order above). They are real-format numbers: KulOffice sends their approval and
-invitation SMS, so prefer numbers the team holds.
+not: set `QA_FIXTURE_PHONES` to four numbers the team holds (in the order
+above), because KulOffice sends them real SMS (approvals, the invitation). There
+are no default numbers; without them the step is skipped with a warning.
 
 Money comes from M-Pesa top-ups through the Gateway's simulator binding: the
 script gives the payer's number a balance at the simulator and approves its

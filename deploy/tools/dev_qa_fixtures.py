@@ -21,8 +21,8 @@ makes one, and approved the way an operator approves one:
   the simulator's payer gets a balance and its prompt is approved on the
   simulator's API, as QA would on its page.
 
-People (QA_FIXTURE_PHONES, comma separated in this order, overrides the
-numbers): requester (verified, asks the family), payer (verified, Conta
+People (QA_FIXTURE_PHONES, required: team-held numbers, comma separated in
+this order): requester (verified, asks the family), payer (verified, Conta
 Pagamento plus a Mo Budget, owns the business), member (verified, restricted
 role in the business and on the requester's account), lite (KulPay Lite). The
 business "Loja Teste QA" (approved, its Conta Pagamento).
@@ -82,8 +82,6 @@ PEOPLE = [
      "first_name": "Marta", "last_name": "Membro Teste", "sex": "F", "fund_minor": 0},
     {"key": "lite", "label": "Conta KulPay Lite (USSD, sem KYC)", "tier": "lite", "fund_minor": 1_500_000},
 ]
-# Test numbers, one per person (QA_FIXTURE_PHONES overrides them in order).
-DEFAULT_PHONES = ["+258840000101", "+258840000102", "+258840000103", "+258840000104"]
 BUSINESS = {"legal_name": "Loja Teste QA, Lda", "short_name": "Loja Teste QA", "plan": "pro", "fund_minor": 3_000_000,
             "email": "loja.teste@example.test", "nuit": "400000001", "registration": "QA-REG-0001"}
 ROLE = {"name": "QA restrito (sem Orientu)", "template": "viewer",
@@ -626,10 +624,13 @@ def cancel_open_requests(token, account_id):
 # ── the run ──────────────────────────────────────────────────────────────────
 
 def phones():
+    # No default numbers: KulOffice sends real SMS (approvals, the invitation) to
+    # them, so they must be numbers the team holds.
     given = [p.strip() for p in os.environ.get("QA_FIXTURE_PHONES", "").split(",") if p.strip()]
-    if given and len(given) != len(PEOPLE):
-        raise SystemExit(f"QA_FIXTURE_PHONES needs {len(PEOPLE)} numbers ({', '.join(p['key'] for p in PEOPLE)})")
-    return given or DEFAULT_PHONES
+    if len(given) != len(PEOPLE):
+        raise SystemExit(f"set QA_FIXTURE_PHONES to {len(PEOPLE)} numbers the team holds ({', '.join(p['key'] for p in PEOPLE)}); "
+                         "the QA accounts get real SMS")
+    return given
 
 
 def step(what, fn, *args):
