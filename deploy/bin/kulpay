@@ -12,6 +12,7 @@
 #   kulpay provision                             init, Gateway events and platform wallet, QR codes, dev seeds (idempotent)
 #   kulpay secrets                               generate the missing generated values into .env
 #   kulpay operator-roles [grant ROLE...]        list operator roles; give a role every permission
+#   kulpay qa-fixtures [reset]                   dev: the QA test accounts (state/qa-fixtures/)
 #
 # Options anywhere: --actor NAME (who asked; CI passes the GitHub user).
 #
@@ -757,6 +758,40 @@ dev_simulator_bank() {
     say "warning: the simulator bank is not ready (simulator-bank-output/readiness-report.json; make simulator-bank to resume)"
 }
 
+# Development stacks: the QA test accounts (Orientu OR-2; make qa-fixtures),
+# made through the customers' own APIs and approved by the development admin
+# (tools/dev_qa_fixtures.py). Their numbers, PINs and ids go to
+# state/qa-fixtures/credentials.json (0600), never to the output. Skipped with
+# DEV_QA_FIXTURES=0 in .env; a failure only warns.
+dev_qa_fixtures() {
+  is_dev || return 0
+  if [[ $(env_get DEV_QA_FIXTURES || true) == 0 ]]; then say "QA test accounts: skipped (DEV_QA_FIXTURES=0)"; return 0; fi
+  say "development: the QA test accounts (make qa-fixtures)"
+  run_qa_fixtures || say "warning: the QA test accounts are not all ready (make qa-fixtures to resume)"
+}
+
+# tools/dev_qa_fixtures.py in the tools image, as this user (the credentials
+# file is theirs), with state/qa-fixtures/ mounted. "reset" also cancels the
+# requester's open Orientu requests.
+run_qa_fixtures() {
+  local email pw dir="$DEPLOY_DIR/$STATE/qa-fixtures"
+  email=$(env_get DEV_ADMIN_EMAIL || true); pw=$(env_get DEV_ADMIN_PASSWORD || true)
+  pw=${pw#[\'\"]}; pw=${pw%[\'\"]}
+  [[ -n $email && -n $pw ]] || { say "QA test accounts: DEV_ADMIN_EMAIL and DEV_ADMIN_PASSWORD are needed"; return 1; }
+  mkdir -p "$dir" && chmod 700 "$dir"
+  compose --profile tools run --rm -u "$(id -u):$(id -g)" -v "$dir:/qa" --entrypoint python3 \
+    -e DEV_ADMIN_EMAIL="$email" -e DEV_ADMIN_PASSWORD="$pw" \
+    -e WORKFORCE_ISSUER="$(env_get KEYCLOAK_PUBLIC_URL)/realms/$(env_get WORKFORCE_REALM || echo workforce)" \
+    -e QA_FIXTURES_FILE=/qa/credentials.json -e QA_FIXTURES_SHOWN_AS="$dir/credentials.json" \
+    tools /tools/dev_qa_fixtures.py "$@"
+}
+
+cmd_qa_fixtures() {
+  is_dev || die "the QA test accounts are for development stacks (DEV_ADMIN_EMAIL set)"
+  lock
+  run_qa_fixtures "$@"
+}
+
 # Real M-Pesa and e-Mola are bound by hand in the Gateway dashboard (their
 # credentials never live in the kit): a warning when KulOffice's account has
 # no live binding for one of them.
@@ -783,6 +818,7 @@ cmd_provision() {
   check_unit kuloffice
   dev_admin
   dev_simulator_bank
+  dev_qa_fixtures
   live_connectors
   echo
   echo "Configured. Still by hand (deploy/README.md):"
@@ -836,6 +872,7 @@ case $command in
   restore) cmd_restore "$@" ;;
   provision) cmd_provision ;;
   operator-roles) cmd_operator_roles "$@" ;;
+  qa-fixtures) cmd_qa_fixtures "$@" ;;
   secrets) gateway_secrets; kuloffice_secrets; say "generated values present in $ENV_FILE (not shown)" ;;
-  *) sed -n '2,22p' "$0" | sed 's/^# \{0,1\}//'; [[ $command == help ]] ;;
+  *) sed -n '2,23p' "$0" | sed 's/^# \{0,1\}//'; [[ $command == help ]] ;;
 esac

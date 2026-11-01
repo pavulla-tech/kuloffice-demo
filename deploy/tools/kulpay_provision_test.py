@@ -44,6 +44,22 @@ class ProvisionTest(unittest.TestCase):
         self.assertIn('say "warning: the simulator bank is not ready', body)
         self.assertNotIn("die ", body)
 
+    def test_the_qa_fixtures_come_after_the_simulator_bank_development_only_and_only_warn(self):
+        self.assert_in_order(function("cmd_provision"), ["dev_simulator_bank", "dev_qa_fixtures", "live_connectors"])
+        body = function("dev_qa_fixtures")
+        self.assertTrue(body.lstrip().startswith("is_dev || return 0"))
+        self.assertIn("DEV_QA_FIXTURES", body)
+        self.assertIn('say "warning: the QA test accounts are not all ready', body)
+        self.assertNotIn("die ", body)
+
+    def test_the_qa_fixtures_write_their_credentials_into_the_state_directory_as_the_caller(self):
+        body = function("run_qa_fixtures")
+        self.assertIn('dir="$DEPLOY_DIR/$STATE/qa-fixtures"', body)
+        self.assertIn('chmod 700 "$dir"', body)
+        self.assertIn('-u "$(id -u):$(id -g)" -v "$dir:/qa"', body)
+        self.assertIn("/tools/dev_qa_fixtures.py", body)
+        self.assertTrue(function("cmd_qa_fixtures").lstrip().startswith("is_dev || die"))
+
     def test_the_live_check_only_reads(self):
         self.assertIn("/tools/live_connectors.py", function("live_connectors"))
 
