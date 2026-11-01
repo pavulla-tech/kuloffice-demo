@@ -208,5 +208,92 @@ class SeedReceiptTemplateTest(unittest.TestCase):
         self.assertEqual(int.from_bytes(head[16:20], "big"), int.from_bytes(head[20:24], "big"), "a square image (the circle)")
 
 
+
+class FakeRoles:
+    def __init__(self, roles):
+        self.roles = roles
+        self.calls = []
+
+    def __call__(self, token, method, path, body=None, base=None):
+        self.calls.append((method, path, body))
+        if method == "GET" and path == "/v1/operator-roles":
+            return 200, {"roles": self.roles}
+        if method == "POST" and path.startswith("/v1/operator-roles/"):
+            role = next(r for r in self.roles if r["id"] == path.rsplit("/", 1)[1])
+            role["permissions"] = body["permissions"]
+            return 200, role
+        raise AssertionError((method, path))
+
+
+def perm(resource, action, **extra):
+    return dict({"resource": resource, "action": action, "code": f"{resource}:{action}", "group": resource}, **extra)
+
+
+class SeedBudgetReviewTest(unittest.TestCase):
+    def setUp(self):
+        import tempfile
+        self.dir = tempfile.TemporaryDirectory()
+        self.addCleanup(self.dir.cleanup)
+        self.state = os.path.join(self.dir.name, "dev_rules.json")
+
+    def seed(self, fake, state=None):
+        rules.call = fake
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            granted = rules.seed_budget_review("token", state or self.state)
+        return granted, out.getvalue()
+
+    def roles(self):
+        return [
+            {"id": "r1", "name": "Operações", "description": "ops",
+             "permissions": [perm("vaquinha_review", "read"), perm("product", "read", scope="product", target_id="prd_1")]},
+            {"id": "r2", "name": "KYC", "description": "kyc", "permissions": [perm("kyc", "read")]},
+            {"id": "r3", "name": "Dinheiro", "description": "", "permissions": [perm("instruction_operation", "read"), perm("budget_review", "read")]},
+        ]
+
+    def test_operations_roles_get_both_actions_and_keep_their_permissions(self):
+        fake = FakeRoles(self.roles())
+        granted, _ = self.seed(fake)
+        self.assertEqual(granted, ["Operações"])
+        posts = [c for c in fake.calls if c[0] == "POST"]
+        self.assertEqual([c[1] for c in posts], ["/v1/operator-roles/r1"])
+        body = posts[0][2]
+        self.assertEqual(body["reason"], rules.BUDGET_REASON)
+        self.assertEqual(body["description"], "ops")
+        self.assertIn({"resource": "product", "action": "read", "scope": "product", "target_id": "prd_1"}, body["permissions"])
+        self.assertIn({"resource": "budget_review", "action": "read"}, body["permissions"])
+        self.assertIn({"resource": "budget_review", "action": "act"}, body["permissions"])
+        with open(self.state) as f:
+            self.assertEqual(json.load(f)["budget_review_roles"], ["r1", "r3"])
+
+    def test_a_second_run_changes_nothing(self):
+        fake = FakeRoles(self.roles())
+        self.seed(fake)
+        fake.calls.clear()
+        granted, _ = self.seed(fake)
+        self.assertEqual(granted, [])
+        self.assertFalse([c for c in fake.calls if c[0] == "POST"])
+
+    def test_an_operator_taking_it_away_is_not_overridden(self):
+        roles = self.roles()
+        fake = FakeRoles(roles)
+        self.seed(fake)
+        roles[0]["permissions"] = [p for p in roles[0]["permissions"] if p["resource"] != "budget_review"]
+        roles[2]["permissions"] = [perm("instruction_operation", "read")]
+        fake.calls.clear()
+        granted, _ = self.seed(fake)
+        self.assertEqual(granted, [])
+        self.assertFalse([c for c in fake.calls if c[0] == "POST"])
+
+    def test_without_a_writable_state_nothing_is_granted(self):
+        fake = FakeRoles(self.roles())
+        blocker = os.path.join(self.dir.name, "file")
+        open(blocker, "w").close()
+        granted, out = self.seed(fake, os.path.join(blocker, "dev_rules.json"))
+        self.assertEqual(granted, [])
+        self.assertIn("no writable state", out)
+        self.assertEqual(fake.calls, [])
+
+
 if __name__ == "__main__":
     unittest.main()

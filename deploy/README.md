@@ -512,6 +512,11 @@ the development admin and runs `tools/dev_rules.py`:
   the centre) is made, unless one of that name is there, and chosen as the
   receipt template (Códigos QR → Modelo dos recibos). An operator's choice is
   never changed.
+- every operations role (one holding `vaquinha_review:read`,
+  `product_operation:read` or `instruction_operation:read`) gets `budget_review`
+  (`read`, `act`: Mo budgets in the back office) once. The roles granted are kept
+  in `state/dev-rules/dev_rules.json`, so a role an operator later takes
+  `budget_review` from is not given it again.
 
 Texts and policies need `KULOFFICE_APPROVALS_SINGLE_OPERATOR=true` (one operator decides on
 dev). `tools/dev_policies_check/check.sh <KulOffice checkout>` proves every

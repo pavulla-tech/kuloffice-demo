@@ -30,6 +30,15 @@ logo, creates "KulPay recibos (dev)" (black square modules and eyes on white,
 that logo in the centre) unless a template of that name is there, and makes it
 the receipt template (Códigos QR → Modelo dos recibos). An operator's choice
 is never changed.
+
+Then the operations roles' budget_review permission (Mo budgets in the back
+office: read, act). A role is an operations role when it holds one of
+OPERATIONS_MARKERS (vaquinha_review:read, product_operation:read or
+instruction_operation:read). Each such role gets both budget_review actions
+once: the role ids granted are kept in DEV_RULES_STATE (the kit's state/,
+mounted by bin/kulpay), so a role an operator later took budget_review from is
+never given it again, and a role that already has either action is left alone.
+Without a writable state file nothing is granted.
 """
 import base64
 import hashlib
@@ -74,6 +83,12 @@ QR_RECEIPT_TEMPLATE = {
     "centre": "logo", "error_correction": "H",
     "style": {"eye_frame": "square", "eye_ball": "square", "eye_frame_colour": "#000000", "frame": "none", "logo_size": 0.24},
 }
+
+# Roles doing operations work; each gets budget_review (read, act) once.
+OPERATIONS_MARKERS = {("vaquinha_review", "read"), ("product_operation", "read"), ("instruction_operation", "read")}
+BUDGET_REVIEW = [("budget_review", "read"), ("budget_review", "act")]
+BUDGET_REASON = "development stack: operations roles review Mo budgets (tools/dev_rules.py)"
+STATE = os.environ.get("DEV_RULES_STATE", "/state/dev_rules.json")
 
 
 def b64url(raw):
@@ -331,6 +346,65 @@ def seed_receipt_template(token, solange_sign_in):
     return template["id"]
 
 
+def load_state(path):
+    """The script's own memory ({} when absent); None when it cannot be read."""
+    try:
+        with open(path, encoding="utf-8") as f:
+            return json.load(f)
+    except FileNotFoundError:
+        return {}
+    except (OSError, ValueError):
+        return None
+
+
+def save_state(path, state):
+    try:
+        os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+        tmp = path + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(state, f, indent=2, sort_keys=True)
+        os.replace(tmp, path)
+        return True
+    except OSError:
+        return False
+
+
+def seed_budget_review(token, state_path=None):
+    """budget_review (read, act) on every operations role, once per role.
+    Returns the names of the roles granted now."""
+    state_path = state_path or STATE
+    state = load_state(state_path)
+    if state is None or not save_state(state_path, state):
+        print(f"  note  budget_review: no writable state at {state_path}; operations roles left alone")
+        return []
+    granted = set(state.get("budget_review_roles", []))
+    status, out = call(token, "GET", "/v1/operator-roles")
+    if status != 200:
+        print(f"  warn  operator roles not listed: {status} {out.get('message', out)}")
+        return []
+    now = []
+    for role in out.get("roles", []):
+        held = {(p.get("resource"), p.get("action")) for p in role.get("permissions", [])}
+        if role.get("id") in granted or not held & OPERATIONS_MARKERS:
+            continue
+        if held & set(BUDGET_REVIEW):
+            granted.add(role["id"])  # an operator's grant: remembered, never redone
+            continue
+        keep = [{k: p[k] for k in ("resource", "action", "scope", "target_id") if p.get(k)} for p in role.get("permissions", [])]
+        add = [{"resource": r, "action": a} for r, a in BUDGET_REVIEW]
+        status, res = call(token, "POST", f"/v1/operator-roles/{role['id']}", {
+            "description": role.get("description", ""), "permissions": keep + add, "reason": BUDGET_REASON})
+        if status >= 300:
+            print(f"  warn  role {role.get('name')}: budget_review not granted: {status} {res.get('message', res)}")
+            continue
+        granted.add(role["id"])
+        now.append(role.get("name", role["id"]))
+    state["budget_review_roles"] = sorted(granted)
+    save_state(state_path, state)
+    print(f"  ok  budget_review: {len(now)} operations roles granted now ({', '.join(now) or 'none'})")
+    return now
+
+
 def once(fn):
     """fn's result, computed on the first call only (one Solange sign-in)."""
     memo = []
@@ -353,6 +427,7 @@ def main():
     solange_sign_in = once(lambda: sign_in(CONSOLE_CLIENT, CONSOLE_URL + "/api/auth/callback"))
     seed_qr_template(token, solange_sign_in)
     seed_receipt_template(token, solange_sign_in)
+    seed_budget_review(token)
 
 
 if __name__ == "__main__":
