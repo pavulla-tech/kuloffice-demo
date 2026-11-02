@@ -479,6 +479,7 @@ policies and the QR general template (below); on dev, the PSP simulator as a
 partner bank (`simulator-bank`, skipped with `DEV_SIMULATOR_BANK=0` or when the
 simulator is not running; it starts over by itself when the Gateway no longer
 has the PSP, keeping the old output in `simulator-bank-output/before-reset-*`);
+on dev, the QA test accounts (`qa-fixtures`, below);
 last, a warning when KulOffice's account has no live M-Pesa or e-Mola binding.
 Those two stay by hand in the Gateway dashboard (Connectors, live), since their
 credentials never live in the kit. Still by hand: other staff (`make operator`),
@@ -529,6 +530,63 @@ enabled until `KULOFFICE_SUPPLY_CLEARING_BALANCE` names the real BLNK clearing
 balance. The two Gateway bases are deliberately different: top-up charge calls
 use the public root `http://gateway:9090`, while every `/v1` account/service
 call uses `http://gateway:9091/v1`.
+
+### QA test accounts (development)
+
+Orientu QA (OR-2) needs accounts the stack never had: a Lite account and a
+business as family members (FAM-11), a team member with a restricted role
+(SEC-02), a customer with two products, and payers with money. On a development
+stack `bin/kulpay provision` makes them after the simulator bank (skip with
+`DEV_QA_FIXTURES=0`; a failure only warns), and `make qa-fixtures` makes or
+repairs them at any time. It is safe to repeat: what exists is kept.
+
+| Fixture | What it is | How it is made |
+|---|---|---|
+| `requester` | verified personal account (full KYC), asks the family | USSD sign-up with a PIN (intaka's `/phone-auth/ussd/register`), `GET /v1/customers/me`, the app's KYC (`POST /v1/kyc-submissions`, selfie), then the development admin claims the review case, transcribes the (fake) document and approves |
+| `payer` | verified, Conta Pagamento with 30 000.00 MZN and a Mo Budget of 1 000.00 (two products); owns the business | as the requester, then M-Pesa top-ups and `POST /v1/accounts/{id}/budgets` |
+| `member` | verified, holds the role `QA restrito (sem Orientu)` (template `viewer`: reads only, no transfers, no Orientu) in the business and on the requester's account | as the requester; the owner makes the role and invites the number, the member accepts (`/v1/me/invites`, `/v1/invites/{id}/accept`) |
+| `lite` | KulPay Lite (USSD, no KYC), 15 000.00 MZN | USSD sign-up, `GET /v1/customers/me`, top-ups |
+| business `Loja Teste QA` | approved business (plan `pro`), Conta Pagamento with 30 000.00 MZN | the payer onboards it (`POST /v1/customers/{id}/business`, NUIT and registration documents, finish); the development admin approves |
+
+Names, emails (`example.test`) and document numbers are fake. The numbers are
+not: set `QA_FIXTURE_PHONES` to four numbers the team holds (in the order
+above), because KulOffice sends them real SMS (approvals, the invitation). There
+are no default numbers; without them the step is skipped with a warning.
+
+Money comes from M-Pesa top-ups through the Gateway's simulator binding: the
+script gives the payer's number a balance at the simulator and approves its
+prompt there (`/api/prompts/{id}/action`), in steps of 5 000.00, up to the
+target, at most eight per account per run. Each run only tops up what is
+missing.
+
+**Credentials.** The PINs are generated and never printed. They are in
+`state/qa-fixtures/credentials.json` (directory 0700, file 0600, owned by whoever
+ran it; `state/` is gitignored), with each person's number, account id,
+Conta Pagamento id and @handle, the Mo Budget, the business and the roles:
+
+```bash
+cd ~/kuloffice-demo/deploy   # the kit's checkout on the server
+jq '.people | map_values({phone, pin, account_id})' state/qa-fixtures/credentials.json
+```
+
+**Signing in as a fixture.** On USSD, or for API tests with the `ussd-gateway`
+client's password grant (number without `+`, PIN; its secret is in Keycloak).
+The web app asks the number's SMS code first. Every account was made on USSD;
+the verified ones then did the app's KYC, as a customer who started on USSD.
+
+**Between same-day runs.** `make qa-fixtures RESET=1` cancels the requester's
+open Orientu requests (the open-request cap) and tops the payers up again. The
+daily-in allowances are not reset: they count every movement of the Maputo
+day under any figure, so changing the `account_limits` policy would not free
+them (and its figures are not ours to change). The run prints each person's
+daily-in left; past it, wait for the next day.
+
+**Biometrics.** With `BIOMETRICS_ENABLED=true` KulOffice reads the document
+with MiniAiLive, which refuses the synthetic images: the three verified people
+stop at `document_rejected` (warned), and the Lite account is still made. With
+biometrics off, every submission goes to a reviewer, and the script is that
+reviewer. Starting over for one person: put a new number in
+`QA_FIXTURE_PHONES` (that person's entry in the file starts again).
 
 ## Day to day
 

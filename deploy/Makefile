@@ -6,7 +6,7 @@
 .PHONY: help setup sync-env clean-env-backups config check-images \
         images push bundle load theme license \
         start start-portal start-website stop restart logs ps update clean reset-blnk \
-        init operator gateway-signin solange-kulpay gateway-kuloffice cash-deposits gateway-billers simulator-bank psp-provision \
+        init operator gateway-signin solange-kulpay gateway-kuloffice cash-deposits gateway-billers simulator-bank psp-provision qa-fixtures \
         deploy rollback releases status health backup restore
 
 ENV_FILE ?= .env
@@ -65,6 +65,7 @@ help:
 	@echo "                          ROLE=ADMIN: the Administradores role (every kuloffice permission)"
 	@echo "                          a staff account; ROLE= (empty) for Solange only"
 	@echo "  make solange-kulpay     KulPay's app in Solange, kuloffice's key and webhook (into .env)"
+	@echo "  make qa-fixtures [RESET=1]  dev: QA test accounts (state/qa-fixtures/credentials.json, 0600)"
 
 # ── setup ─────────────────────────────────────────────────────────────────────
 
@@ -309,6 +310,16 @@ simulator-bank:
 		-e PSP_CONFIG=/psp/simulator-bank.example.yaml -e PSP_OUTPUT=/output \
 		-e GATEWAY_PUBLIC_INTERNAL_URL=http://gateway:9090 \
 		--entrypoint sh tools -c 'python3 -c "import yaml" 2>/dev/null || python3 -m pip install --quiet --disable-pip-version-check --target /tmp/py pyyaml; PYTHONPATH=/tmp/py exec python3 /psp/psp_provision.py $(SIMBANK)'
+
+# Development stacks: the QA test accounts (Orientu OR-2; tools/dev_qa_fixtures.py,
+# also run by bin/kulpay provision): verified requester, payer with a Conta
+# Pagamento and a Mo Budget, a Lite account, an approved business and a team
+# member with a restricted role, funded through the simulator. Credentials go to
+# state/qa-fixtures/credentials.json (0600), never to the output. RESET=1 also
+# cancels the requester's open Orientu requests. Safe to repeat.
+RESET ?=
+qa-fixtures:
+	@$(KULPAY) qa-fixtures $(if $(RESET),reset)
 
 # ROLE=ADMIN: an admin, holding every permission in kuloffice's catalogue.
 ROLE ?= Revisores
