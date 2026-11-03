@@ -103,12 +103,14 @@ transactions. The simulator and `gateway-bind` must never run beside real
 provider credentials; see `kuloffice/docs/security-plan.md` for the controls
 planned before production.
 
-The gateway and simulator images never go to a registry (`localhost/…`
-names cannot be pulled). On the laptop, `make bundle` builds both at the tags
-in `.env` into `bundles/kulpay-images-….tar.gz` with its `.sha256`; copy both
-to the server's `deploy/` and run `make load FILE=kulpay-images-….tar.gz`
-there before setting `GATEWAY_TAG` / `SIMULATOR_TAG`. A deploy refuses a
-`localhost/` tag that is not loaded.
+The gateway image is on Docker Hub like the others, released by its own
+tags; it refuses to start without `GATEWAY_LICENSE_KEY` in `.env`. The
+simulator image never goes to a registry (`localhost/…` names cannot be
+pulled). On the laptop, `make bundle` builds it at the tag in `.env` into
+`bundles/kulpay-images-….tar.gz` with its `.sha256`; copy both to the
+server's `deploy/` and run `make load FILE=kulpay-images-….tar.gz` there
+before setting `SIMULATOR_TAG`. A deploy refuses a `localhost/` tag that is
+not loaded.
 
 ### PSP onboarding and the simulator's Gateway connection
 
@@ -281,7 +283,7 @@ git tag v0.1.0-alpha03 && git push origin v0.1.0-alpha03
 | boquisso-fileserver | `fileserver` | fileserver | none |
 | solange | `solange` | solange, solange-console | Solange's database |
 | kulportal | `kulportal` | kulportal | none (no workflow yet) |
-| katembe-payments | `gateway` | gateway (bundle, not Docker Hub) | the gateway's database (a reset wipes kuloffice too: its top-ups hold the gateway's ids) |
+| katembe-payments (kulpay-payments) | `gateway` | gateway | the gateway's database (a reset wipes kuloffice too: its top-ups hold the gateway's ids) |
 | kulpay-psp-simulator | `simulator` | simulator (bundle, not Docker Hub) | its prompts and balances (a volume) |
 
 Each repository's `.github/workflows/release.yml` runs its tests, then this

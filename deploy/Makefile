@@ -30,7 +30,7 @@ help:
 	@echo "Images (on the laptop)"
 	@echo "  make images [S=WEB]     build every image (or one) for TARGET_PLATFORM"
 	@echo "  make push [S=WEB]       push them to Docker Hub (docker login first)"
-	@echo "  make bundle [S=…]       build the gateway and simulator into one archive for scp"
+	@echo "  make bundle [S=…]       build the simulator into an archive for scp"
 	@echo "  make theme              copy intaka's login theme into theme/ (commit it)"
 	@echo "  make license            print a kuloffice license key (KULOFFICE_DIR/keys)"
 	@echo ""
@@ -118,8 +118,11 @@ build_KULPORTAL       = docker build --platform $$TARGET_PLATFORM -t "$$KULPORTA
 build_WEBSITE         = docker build --platform $$TARGET_PLATFORM -t "$$WEBSITE_IMAGE:$$WEBSITE_TAG" -f images/website.Dockerfile \
 	  --build-arg BASE_URL="$$WEBSITE_PUBLIC_URL/" "$$WEBSITE_DIR"
 # The payments gateway and the PSP simulator build from their repositories' own
-# Dockerfiles.
-build_GATEWAY         = docker build --platform $$TARGET_PLATFORM -t "$$GATEWAY_IMAGE:$$GATEWAY_TAG" "$$GATEWAY_DIR"
+# Dockerfiles. The gateway links the same license public key as kuloffice (its
+# licenses are signed with the same key, for product kulpay-payments).
+build_GATEWAY         = key=$$(cat keys/kuloffice-license.pub.base64) || exit 1; \
+	docker build --platform $$TARGET_PLATFORM -t "$$GATEWAY_IMAGE:$$GATEWAY_TAG" \
+	  --build-arg LICENSE_PUBLIC_KEY="$$key" --build-arg LICENSE_ISSUER=pavulla.com "$$GATEWAY_DIR"
 build_SIMULATOR       = docker build --platform $$TARGET_PLATFORM -t "$$SIMULATOR_IMAGE:$$SIMULATOR_TAG" "$$SIMULATOR_DIR"
 
 images: check-images
@@ -144,7 +147,7 @@ push: check-images
 
 # Images that never go to a registry (localhost/…): built, saved into one
 # archive under bundles/, copied to the server (scp), loaded there.
-BUNDLED = GATEWAY SIMULATOR
+BUNDLED = SIMULATOR
 bundle: check-images
 	@$(MAKE) --no-print-directory images S="$(or $(S),$(BUNDLED))"
 	@set -a; . ./$(ENV_FILE); set +a; set -e; refs=""; name="kulpay-images"; \

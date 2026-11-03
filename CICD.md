@@ -34,6 +34,7 @@ A unit is one repository's output. All its images carry the repository's tag.
 | kulpay-webapp | `main` | `web` | web | none |
 | boquisso-fileserver | `main` | `fileserver` | fileserver | none |
 | kulportal2 | `main` | `kulportal` | kulportal | none |
+| kulpay-payments | `rebrand/kulpay` | `gateway` | gateway (with the license public key) | the gateway's database, **plus kuloffice's database and files** |
 
 A tag only triggers a release if the tagged commit contains
 `.github/workflows/release.yml`. That is why the branch matters: tag the
@@ -106,8 +107,8 @@ Where they live, because of GitHub Free: **organisation secrets reach public
 repositories only.** Private repositories receive them empty, even though
 GitHub lists them as available. So:
 
-- **The five private service repositories** each hold their own copy. One
-  command asks for each value once and sets it in all five:
+- **The private service repositories** each hold their own copy. One
+  command asks for each value once and sets it in all of them:
 
   ```bash
   sh deploy/ci/set-secrets.sh                    # all of them
@@ -136,7 +137,7 @@ Which repository needs which:
 
 | Repository | Needs |
 |---|---|
-| kuloffice, intaka, solange, kulpay-webapp, boquisso-fileserver | `KULPAY_DOCKERHUB_USERNAME`, `KULPAY_DOCKERHUB_TOKEN`, `DEPLOY_HOST`, `DEPLOY_USER`, `DEPLOY_PASSWORD`, `DEPLOY_KNOWN_HOSTS` (+ `DEPLOY_PORT`) |
+| kuloffice, intaka, solange, kulpay-webapp, boquisso-fileserver, kulportal2, kulpay-payments | `KULPAY_DOCKERHUB_USERNAME`, `KULPAY_DOCKERHUB_TOKEN`, `DEPLOY_HOST`, `DEPLOY_USER`, `DEPLOY_PASSWORD`, `DEPLOY_KNOWN_HOSTS` (+ `DEPLOY_PORT`) |
 | kuloffice-demo (Rollback, Server workflows) | `DEPLOY_HOST`, `DEPLOY_USER`, `DEPLOY_PASSWORD`, `DEPLOY_KNOWN_HOSTS` (+ `DEPLOY_PORT`) |
 
 Notes:

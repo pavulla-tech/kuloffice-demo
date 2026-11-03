@@ -12,7 +12,7 @@
 # Needs gh logged in as someone who can administer those repositories.
 set -eu
 # REPOS=kulportal2 sh deploy/ci/set-secrets.sh: only those.
-repos=${REPOS:-"kuloffice kulpay-webapp intaka solange boquisso-fileserver kulportal2"}
+repos=${REPOS:-"kuloffice kulpay-webapp intaka solange boquisso-fileserver kulportal2 kulpay-payments"}
 names=${*:-"KULPAY_DOCKERHUB_USERNAME KULPAY_DOCKERHUB_TOKEN DEPLOY_HOST DEPLOY_USER DEPLOY_PASSWORD DEPLOY_KNOWN_HOSTS"}
 
 for name in $names; do

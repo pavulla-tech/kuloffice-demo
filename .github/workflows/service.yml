@@ -21,7 +21,7 @@ on:
   workflow_call:
     inputs:
       unit:
-        description: keycloak, kuloffice, web, fileserver, solange or kulportal
+        description: keycloak, kuloffice, web, fileserver, solange, kulportal or gateway
         type: string
         required: true
       kit-ref:
