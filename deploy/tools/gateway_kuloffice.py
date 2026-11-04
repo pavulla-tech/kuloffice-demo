@@ -50,6 +50,12 @@ PARTNERS_SCOPE = "service:partners:write"
 # reset loses it, so every run recreates and activates it when missing.
 # Activation is maker/checker: the admin key requests, the checker approves.
 CHECKER_KEY = os.environ.get("GATEWAY_CHECKER_KEY", "")
+# KulPay's payment page (KulOffice docs/scanned-payments.md) mounts the
+# Gateway's card fields: the web app's address may embed them, and the page
+# loads them with a publishable key of KulOffice's account (issued once; a
+# Gateway reset forgets it: empty the .env line to issue another).
+WEB_URL = os.environ.get("WEB_PUBLIC_URL", "").strip().rstrip("/")
+PUBLISHABLE_KEY = os.environ.get("KULOFFICE_SCANNED_PAYMENTS_CARD_FIELDS_PUBLISHABLE_KEY", "").strip()
 BILLER_CODE = os.environ.get("GATEWAY_KULOFFICE_BILLER_CODE", "").strip().upper() or "KULPAY"
 BILLER = {
     "code": BILLER_CODE,
@@ -211,6 +217,30 @@ def ensure_cash_in_incoming():
     print("cash deposits for KulOffice's references are recorded as incoming transfers", file=sys.stderr)
 
 
+def ensure_card_fields():
+    if not ACCOUNT_ID or not WEB_URL:
+        raise RuntimeError("GATEWAY_ACCOUNT_ID and WEB_PUBLIC_URL are required for the card fields")
+    request("PUT", f"/admin/accounts/{ACCOUNT_ID}/card-settings", ADMIN_KEY,
+            {"card_data_api": False, "card_field_origins": [WEB_URL]})
+    print(f"card fields may be embedded by {WEB_URL}", file=sys.stderr)
+
+
+def ensure_publishable_key():
+    """The publishable key the payment page loads the card fields with:
+    issued when .env has none. Never printed except to the wrapper."""
+    if PUBLISHABLE_KEY:
+        print("publishable key already set", file=sys.stderr)
+        return ""
+    _, created = request("POST", f"/admin/accounts/{ACCOUNT_ID}/keys", ADMIN_KEY,
+                         {"name": "kuloffice-card-fields", "type": "pk"})
+    key = created.get("key", {}) if isinstance(created, dict) else {}
+    secret = key.get("secret", "")
+    if not secret:
+        raise RuntimeError("Gateway issued the publishable key without returning it")
+    print("publishable key issued", file=sys.stderr)
+    return secret
+
+
 def partners_key_known(key):
     """True when the Gateway still authenticates the key with the partners
     scope; False when it answers 401/403 (a reset forgot it) or the key lost
@@ -326,12 +356,18 @@ def main():
     if CASH_IN_INCOMING:
         ensure_cash_in_incoming()
     partners = ensure_partners_key() if BILLER_PROVISIONING else ""
+    publishable = ""
+    if WEB_URL and ACCOUNT_ID:
+        ensure_card_fields()
+        publishable = ensure_publishable_key()
     if incoming:
         print("KULOFFICE_INCOMING_TRANSFERS_WEBHOOK_SECRETS=" + incoming)
     if service:
         print("KULOFFICE_PAYMENT_ACCEPTANCE_WEBHOOK_SECRETS=" + service)
     if partners:
         print("KULOFFICE_BILLER_PROVISIONING_GATEWAY_API_KEY=" + partners)
+    if publishable:
+        print("KULOFFICE_SCANNED_PAYMENTS_CARD_FIELDS_PUBLISHABLE_KEY=" + publishable)
 
 
 if __name__ == "__main__":

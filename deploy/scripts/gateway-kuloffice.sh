@@ -1,5 +1,6 @@
 #!/bin/sh
-# Provision the two signed Gateway event feeds KulOffice consumes.  Secrets
+# Provision the two signed Gateway event feeds KulOffice consumes, and the
+# card fields of KulPay's payment page (allowed origin, publishable key).  Secrets
 # returned once by the Gateway are captured into the ignored .env and never
 # printed. The Keycloak service client itself is provisioned by tools/init.sh.
 set -eu
@@ -34,11 +35,14 @@ fi
 
 # The tools image's entrypoint is sh, so python3 is the entrypoint here.
 result=$($COMPOSE --profile tools run --rm -e GATEWAY_CASH_IN_INCOMING="${GATEWAY_CASH_IN_INCOMING:-}" \
-  -e GATEWAY_BILLER_PROVISIONING="${GATEWAY_BILLER_PROVISIONING:-}" --entrypoint python3 tools /tools/gateway_kuloffice.py)
+  -e GATEWAY_BILLER_PROVISIONING="${GATEWAY_BILLER_PROVISIONING:-}" \
+  -e WEB_PUBLIC_URL="$(grep '^WEB_PUBLIC_URL=' "$env_file" | cut -d= -f2-)" \
+  -e KULOFFICE_SCANNED_PAYMENTS_CARD_FIELDS_PUBLISHABLE_KEY="$(grep '^KULOFFICE_SCANNED_PAYMENTS_CARD_FIELDS_PUBLISHABLE_KEY=' "$env_file" | cut -d= -f2-)" \
+  --entrypoint python3 tools /tools/gateway_kuloffice.py)
 if [ -n "$result" ]; then
   printf '%s\n' "$result" | while IFS='=' read -r key value; do
     case "$key" in
-      KULOFFICE_INCOMING_TRANSFERS_WEBHOOK_SECRETS|KULOFFICE_PAYMENT_ACCEPTANCE_WEBHOOK_SECRETS|KULOFFICE_BILLER_PROVISIONING_GATEWAY_API_KEY)
+      KULOFFICE_INCOMING_TRANSFERS_WEBHOOK_SECRETS|KULOFFICE_PAYMENT_ACCEPTANCE_WEBHOOK_SECRETS|KULOFFICE_BILLER_PROVISIONING_GATEWAY_API_KEY|KULOFFICE_SCANNED_PAYMENTS_CARD_FIELDS_PUBLISHABLE_KEY)
         [ -n "$value" ] || { echo "$key was empty" >&2; exit 1; }
         set_env "$key" "$value"
         ;;

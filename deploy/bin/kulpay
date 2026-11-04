@@ -458,7 +458,7 @@ portal_setup() {
 # KulOffice's generated secrets, made once into .env (not shown): the
 # env-admin password (at least 20 characters outside development, IG-84) and
 # the provisioning seal key (base64 of 32 bytes, IG-67) and the checkout
-# wake-up signing secrets (IG-45).
+# wake-up signing secrets (IG-45), and the payment page's SMS codes' HMAC key.
 kuloffice_secrets() {
   local pw
   [[ -n $(env_get KULOFFICE_ADMIN_PASSWORD || true) ]] ||
@@ -470,7 +470,7 @@ kuloffice_secrets() {
   [[ -n $(env_get KULOFFICE_PAYMENT_ACCEPTANCE_SECRET_SEAL_KEY || true) ]] ||
     env_set KULOFFICE_PAYMENT_ACCEPTANCE_SECRET_SEAL_KEY "$(head -c 32 /dev/urandom | base64 | tr -d '\n')"
   local k
-  for k in KULOFFICE_CHECKOUT_PROVIDER_WAKEUP_SIGNING_SECRETS KULOFFICE_CHECKOUT_PROVIDER_WAKEUP_TEST_SIGNING_SECRETS; do
+  for k in KULOFFICE_CHECKOUT_PROVIDER_WAKEUP_SIGNING_SECRETS KULOFFICE_CHECKOUT_PROVIDER_WAKEUP_TEST_SIGNING_SECRETS KULOFFICE_SCANNED_PAYMENTS_OTP_SECRET; do
     [[ -n $(env_get "$k" || true) ]] ||
       env_set "$k" "$(head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n')"
   done

@@ -58,6 +58,8 @@ class FakeGateway:
         if method == "POST" and path == "/admin/billers/KULPAY/products":
             self.products.append(dict(body))
             return 201, body
+        if method == "PUT" and path == "/admin/accounts/acc_kuloffice/card-settings":
+            return 200, body
         if method == "PUT" and path == "/admin/accounts/acc_kuloffice/cash-in-incoming":
             return 200, {"enabled": True}
         if method == "PATCH" and path == "/admin/billers/KULPAY":
@@ -386,3 +388,31 @@ class KulOfficeBillerTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class CardFieldsTest(unittest.TestCase):
+    def setUp(self):
+        self.fake = FakeGateway()
+        self.saved = (gateway.request, gateway.WEB_URL, gateway.PUBLISHABLE_KEY)
+        gateway.request = self.fake
+        gateway.WEB_URL = "https://app.kulpay.test"
+
+    def tearDown(self):
+        gateway.request, gateway.WEB_URL, gateway.PUBLISHABLE_KEY = self.saved
+
+    def test_the_web_app_may_embed_the_card_fields_and_a_publishable_key_is_issued_once(self):
+        gateway.PUBLISHABLE_KEY = ""
+        with contextlib.redirect_stderr(io.StringIO()):
+            gateway.ensure_card_fields()
+            secret = gateway.ensure_publishable_key()
+        self.assertEqual(secret, "partners-new")
+        self.assertIn(("PUT", "/admin/accounts/acc_kuloffice/card-settings", gateway.ADMIN_KEY,
+                       {"card_data_api": False, "card_field_origins": ["https://app.kulpay.test"]}), self.fake.calls)
+        issued = [c for c in self.fake.calls if c[1] == "/admin/accounts/acc_kuloffice/keys"]
+        self.assertEqual(issued[0][3], {"name": "kuloffice-card-fields", "type": "pk"})
+
+    def test_a_publishable_key_in_env_is_kept(self):
+        gateway.PUBLISHABLE_KEY = "pk_live_kept"
+        with contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(gateway.ensure_publishable_key(), "")
+        self.assertEqual(self.fake.calls, [])
