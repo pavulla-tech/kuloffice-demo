@@ -409,6 +409,7 @@ services:
       gateway-db-init: { condition: service_completed_successfully }
       gateway-config: { condition: service_completed_successfully }
     command: ["migrate", "--config", "/etc/kulpay/kulpay-payments.yaml"]
+    networks: [kulpay]
     environment:
       KULPAY_MODE: live
       KULPAY_DB_URL: *gateway-db
