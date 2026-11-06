@@ -15,6 +15,7 @@ import sys
 import urllib.error
 import urllib.parse
 import urllib.request
+from urllib.parse import quote
 
 KEYCLOAK = os.environ["KEYCLOAK_URL"].rstrip("/")
 REALM = os.environ.get("WORKFORCE_REALM", "workforce")
@@ -88,11 +89,14 @@ def main():
         if not isinstance(found, list) or not found:
             print(f"  --  no {GATEWAY_CLIENT} client yet (make gateway-signin), Gateway role not granted")
         else:
-            status, role = call("GET", f"/admin/realms/{REALM}/clients/{found[0]['id']}/roles/operator", t)
-            if status != 200:
-                sys.exit(f"no operator role on {GATEWAY_CLIENT}: {status} {role}")
-            call("POST", f"/admin/realms/{REALM}/users/{uid}/role-mappings/clients/{found[0]['id']}", t, body=[role])
-            print("  ok  Gateway operator dashboard")
+            roles = []
+            for name in ("operator", "kulpay-scope:*", "kulpay-tenant:*"):
+                status, role = call("GET", f"/admin/realms/{REALM}/clients/{found[0]['id']}/roles/{quote(name, safe='')}", t)
+                if status != 200:
+                    sys.exit(f"no {name} role on {GATEWAY_CLIENT} (make gateway-signin): {status} {role}")
+                roles.append(role)
+            call("POST", f"/admin/realms/{REALM}/users/{uid}/role-mappings/clients/{found[0]['id']}", t, body=roles)
+            print("  ok  Gateway operator dashboard: every scope and tenant")
 
 
 if __name__ == "__main__":

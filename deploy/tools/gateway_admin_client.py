@@ -13,13 +13,21 @@ import sys
 import urllib.error
 import urllib.parse
 import urllib.request
+from urllib.parse import quote
 
 KEYCLOAK = os.environ["KEYCLOAK_URL"].rstrip("/")
 REALM = os.environ.get("WORKFORCE_REALM", "workforce")
 CLIENT = os.environ.get("GATEWAY_OIDC_CLIENT_ID", "kulpay-gateway-admin")
 DASHBOARD = os.environ.get("GATEWAY_MGMT_PUBLIC_URL", "https://mgnt.kulpay.pavulla.com").rstrip("/")
 SECRET = os.environ["GATEWAY_OIDC_CLIENT_SECRET"]
-ROLE = ("operator", "Entra no painel de operadores da Gateway.")
+# operator signs in (KULPAY_OIDC_REQUIRED_ROLE); what an operator may do and
+# which tenants it sees come from kulpay-scope:<scope> and
+# kulpay-tenant:<account> roles (SEC-02): on this dev stack, all of them.
+ROLES = [
+    ("operator", "Entra no painel de operadores da Gateway."),
+    ("kulpay-scope:*", "Todas as permissões de operador da Gateway."),
+    ("kulpay-tenant:*", "Vê todos os tenants da Gateway."),
+]
 
 
 def call(method, path, token=None, body=None, form=None):
@@ -70,11 +78,11 @@ def main():
             sys.exit(f"creating {CLIENT} failed: {status} {out}")
         cid = call("GET", f"/admin/realms/{REALM}/clients?clientId={CLIENT}", t)[1][0]["id"]
         print(f"  ok  client '{CLIENT}' created: redirects to {DASHBOARD}/admin/callback")
-    name, description = ROLE
-    status, _ = call("GET", f"/admin/realms/{REALM}/clients/{cid}/roles/{name}", t)
-    if status == 404:
-        call("POST", f"/admin/realms/{REALM}/clients/{cid}/roles", t, body={"name": name, "description": description})
-        print(f"  ok  role '{name}' created")
+    for name, description in ROLES:
+        status, _ = call("GET", f"/admin/realms/{REALM}/clients/{cid}/roles/{quote(name, safe='')}", t)
+        if status == 404:
+            call("POST", f"/admin/realms/{REALM}/clients/{cid}/roles", t, body={"name": name, "description": description})
+            print(f"  ok  role '{name}' created")
 
 
 if __name__ == "__main__":
