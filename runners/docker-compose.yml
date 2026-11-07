@@ -1,0 +1,124 @@
+# pavulla-tech's self-hosted GitHub Actions runners, on the dev server
+# (README.md). Two build runners (tests, image builds) and one small deploy
+# runner, registered once to the organisation. Jobs on them use no GitHub
+# minutes. Each build runner has its own Docker engine (a dind sidecar), so a
+# job never sees or prunes the stack's containers and images.
+#
+# The registration token is only in .env (RUNNER_TOKEN, valid one hour): the
+# runners keep their registration in their volume after the first start.
+
+x-runner: &runner
+  image: ${RUNNER_IMAGE:-myoung34/github-runner:latest}
+  restart: unless-stopped
+  environment: &runner-env
+    RUNNER_SCOPE: org
+    ORG_NAME: ${ORG_NAME:-pavulla-tech}
+    RUNNER_TOKEN: ${RUNNER_TOKEN:-}
+    RUNNER_GROUP: ${RUNNER_GROUP:-Default}
+    # The registration and the runner's files survive restarts here.
+    CONFIGURED_ACTIONS_RUNNER_FILES_DIR: /runner/data
+    RUNNER_WORKDIR: /runner/work
+    DISABLE_AUTO_UPDATE: "false"
+  networks: [runners]
+
+x-dind: &dind
+  image: ${DIND_IMAGE:-docker:27-dind}
+  restart: unless-stopped
+  privileged: true
+  environment:
+    DOCKER_TLS_CERTDIR: /certs
+  networks: [runners]
+
+services:
+  build-1:
+    <<: *runner
+    environment:
+      <<: *runner-env
+      RUNNER_NAME: pavulla-build-1
+      LABELS: self-hosted,linux,x64,pavulla,build
+      DOCKER_HOST: tcp://dind-1:2376
+      DOCKER_TLS_VERIFY: "1"
+      DOCKER_CERT_PATH: /certs/client
+      # Go's module and build caches stay between jobs (no GitHub cache).
+      GOMODCACHE: /runner/cache/go/mod
+      GOCACHE: /runner/cache/go/build
+      npm_config_cache: /runner/cache/npm
+    volumes:
+      - build-1-data:/runner/data
+      - build-1-work:/runner/work
+      - build-1-cache:/runner/cache
+      - build-1-tools:/opt/hostedtoolcache
+      - dind-1-certs:/certs/client:ro
+    depends_on: [dind-1]
+    cpus: 3
+    mem_limit: 6g
+
+  dind-1:
+    <<: *dind
+    volumes:
+      - dind-1-certs:/certs/client
+      - dind-1-docker:/var/lib/docker
+    cpus: 3
+    mem_limit: 6g
+
+  build-2:
+    <<: *runner
+    environment:
+      <<: *runner-env
+      RUNNER_NAME: pavulla-build-2
+      LABELS: self-hosted,linux,x64,pavulla,build
+      DOCKER_HOST: tcp://dind-2:2376
+      DOCKER_TLS_VERIFY: "1"
+      DOCKER_CERT_PATH: /certs/client
+      GOMODCACHE: /runner/cache/go/mod
+      GOCACHE: /runner/cache/go/build
+      npm_config_cache: /runner/cache/npm
+    volumes:
+      - build-2-data:/runner/data
+      - build-2-work:/runner/work
+      - build-2-cache:/runner/cache
+      - build-2-tools:/opt/hostedtoolcache
+      - dind-2-certs:/certs/client:ro
+    depends_on: [dind-2]
+    cpus: 3
+    mem_limit: 6g
+
+  dind-2:
+    <<: *dind
+    volumes:
+      - dind-2-certs:/certs/client
+      - dind-2-docker:/var/lib/docker
+    cpus: 3
+    mem_limit: 6g
+
+  # Deploys only: an SSH command and a wait on the health check. No Docker.
+  deploy:
+    <<: *runner
+    environment:
+      <<: *runner-env
+      RUNNER_NAME: pavulla-deploy
+      LABELS: self-hosted,linux,x64,pavulla,deploy
+    volumes:
+      - deploy-data:/runner/data
+      - deploy-work:/runner/work
+    cpus: 0.5
+    mem_limit: 512m
+
+networks:
+  runners:
+
+volumes:
+  build-1-data: {}
+  build-1-work: {}
+  build-1-cache: {}
+  build-1-tools: {}
+  dind-1-certs: {}
+  dind-1-docker: {}
+  build-2-data: {}
+  build-2-work: {}
+  build-2-cache: {}
+  build-2-tools: {}
+  dind-2-certs: {}
+  dind-2-docker: {}
+  deploy-data: {}
+  deploy-work: {}

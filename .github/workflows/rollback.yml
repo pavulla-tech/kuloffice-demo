@@ -33,7 +33,7 @@ concurrency:
 jobs:
   rollback:
     name: Roll back ${{ inputs.unit }}
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, pavulla, deploy]
     steps:
       - name: Command
         id: command

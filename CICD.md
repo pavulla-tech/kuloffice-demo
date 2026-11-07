@@ -22,6 +22,14 @@ release.yml (that repository)
                                                     ok: green │ failed: back to the previous tag, red
 ```
 
+## Where the jobs run
+
+On pavulla-tech's own runners on the dev server, not GitHub's machines (no
+GitHub minutes; owner 2026-11-07): `runs-on: [self-hosted, pavulla, build]` for
+tests and builds, `[self-hosted, pavulla, deploy]` for deploys. Setup and
+operation: [`runners/README.md`](runners/README.md). Every job of a workflow asks
+for them, the reusable `service.yml` included.
+
 ## Units: what each repository ships
 
 A unit is one repository's output. All its images carry the repository's tag.

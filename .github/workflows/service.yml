@@ -39,7 +39,7 @@ permissions:
 jobs:
   build:
     name: Build ${{ inputs.unit }} ${{ github.ref_name }}
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, pavulla, build]
     steps:
       - name: Check the tag
         run: |
@@ -72,13 +72,16 @@ jobs:
           username: ${{ secrets.KULPAY_DOCKERHUB_USERNAME }}
           password: ${{ secrets.KULPAY_DOCKERHUB_TOKEN }}
       - name: Build and push
-        run: kit/deploy/ci/build.sh "${{ inputs.unit }}" "$GITHUB_REF_NAME" src --push
+        # The runners are pavulla-tech's own (runners/README.md): make may be missing.
+        run: |
+          command -v make > /dev/null || { sudo apt-get update -qq && sudo apt-get install -y -qq make > /dev/null; }
+          kit/deploy/ci/build.sh "${{ inputs.unit }}" "$GITHUB_REF_NAME" src --push
 
   deploy:
     name: Deploy ${{ inputs.unit }} ${{ github.ref_name }}
     if: inputs.deploy
     needs: build
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, pavulla, deploy]
     # The server also queues deploys coming from other repositories.
     concurrency:
       group: kulpay-server
