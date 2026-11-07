@@ -59,6 +59,8 @@ services:
 
   dind-1:
     <<: *dind
+    # Its TLS certificate names this host, the one build-1 connects to.
+    hostname: dind-1
     volumes:
       - dind-1-certs:/certs/client
       - dind-1-docker:/var/lib/docker
@@ -89,6 +91,8 @@ services:
 
   dind-2:
     <<: *dind
+    # Its TLS certificate names this host, the one build-2 connects to.
+    hostname: dind-2
     volumes:
       - dind-2-certs:/certs/client
       - dind-2-docker:/var/lib/docker
