@@ -17,6 +17,10 @@ x-runner: &runner
     RUNNER_GROUP: ${RUNNER_GROUP:-Default}
     # The registration and the runner's files survive restarts here.
     CONFIGURED_ACTIONS_RUNNER_FILES_DIR: /runner/data
+    # Keep the registration when a container stops: deregistering needs a
+    # token at every start, and the one-hour registration token is gone after
+    # the first (without this the runners restart in a loop).
+    DISABLE_AUTOMATIC_DEREGISTRATION: "true"
     RUNNER_WORKDIR: /runner/work
     DISABLE_AUTO_UPDATE: "false"
   networks: [runners]
