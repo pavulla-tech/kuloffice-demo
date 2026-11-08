@@ -128,6 +128,22 @@ port 465 (gateway v0.1.1-alpha07 on). Verify with
 `docker compose --env-file .env logs gateway` that there is no
 `no mail relay configured` warning and no SMTP delivery error.
 
+Two more Gateway settings in `deploy/.env` (empty means the compose default):
+
+- `KULPAY_PORTAL_REQUIRE_SECOND_FACTOR`: the partner portal's authenticator
+  code before live keys, webhooks, contacts and team changes. `false` here
+  until partners have registered their second factor; `true` turns it on.
+- `KULPAY_RESIDENCY_BACKUP_LOCATION` and `KULPAY_RESIDENCY_LOG_LOCATION`: what
+  the residency report (`GET /v1/admin/residency`) says about where backups
+  and logs are. The defaults describe this kit (`bin/kulpay` dumps in
+  `deploy/state/backups/` on this server, Docker's json-file logs on its
+  disk); state them exactly if they go elsewhere. Unset in live mode, the
+  Gateway logs `data residency not stated`.
+
+The Gateway's schema changes are applied by `gateway-migrate` (the binary's
+`migrate`) before the gateway starts; the gateway refuses to start on a schema
+behind what it needs.
+
 The simulator has three distinct Gateway relationships:
 
 - its provider endpoints are already bound by `gateway-bind` for KulPay's own
