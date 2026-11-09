@@ -6,6 +6,14 @@
 #
 # The registration token is only in .env (RUNNER_TOKEN, valid one hour): the
 # runners keep their registration in their volume after the first start.
+#
+# Light on the server (2026-11-09: about 11 GB free, no swap): every runner and
+# Docker engine has a low CPU weight (cpu_shares 256 against the default 1024),
+# so the dev stack and the server's other services win when the CPU is
+# contended; an idle server still gives the builds their CPUs. The Docker
+# engines are capped at 4 GB (Go image builds peak there). Short jobs (meta,
+# publishing a release, submitting it) go to the small «light» runner instead
+# of holding a build runner.
 
 x-runner: &runner
   image: ${RUNNER_IMAGE:-myoung34/github-runner:latest}
@@ -24,6 +32,7 @@ x-runner: &runner
     RUNNER_WORKDIR: /runner/work
     DISABLE_AUTO_UPDATE: "false"
   networks: [runners]
+  cpu_shares: 256
 
 x-dind: &dind
   image: ${DIND_IMAGE:-docker:27-dind}
@@ -32,6 +41,7 @@ x-dind: &dind
   environment:
     DOCKER_TLS_CERTDIR: /certs
   networks: [runners]
+  cpu_shares: 256
 
 services:
   build-1:
@@ -65,7 +75,7 @@ services:
       - dind-1-certs:/certs/client
       - dind-1-docker:/var/lib/docker
     cpus: 3
-    mem_limit: 6g
+    mem_limit: 4g
 
   build-2:
     <<: *runner
@@ -97,7 +107,22 @@ services:
       - dind-2-certs:/certs/client
       - dind-2-docker:/var/lib/docker
     cpus: 3
-    mem_limit: 6g
+    mem_limit: 4g
+
+  # Short jobs: a release's meta step, publishing it on GitHub, submitting it
+  # to KulOffice. No Docker engine; tools come from apt or setup-* actions.
+  light:
+    <<: *runner
+    environment:
+      <<: *runner-env
+      RUNNER_NAME: pavulla-light
+      LABELS: self-hosted,linux,x64,pavulla,light
+    volumes:
+      - light-data:/runner/data
+      - light-work:/runner/work
+      - light-tools:/opt/hostedtoolcache
+    cpus: 1
+    mem_limit: 1536m
 
   # Deploys only: an SSH command and a wait on the health check. No Docker.
   deploy:
@@ -130,3 +155,6 @@ volumes:
   dind-2-docker: {}
   deploy-data: {}
   deploy-work: {}
+  light-data: {}
+  light-work: {}
+  light-tools: {}

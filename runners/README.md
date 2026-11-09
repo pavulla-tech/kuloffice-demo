@@ -6,11 +6,16 @@ reads the workflows, queues the jobs, holds the secrets and shows the logs.
 
 | Runner | Labels | Cap | Runs |
 |---|---|---|---|
-| `pavulla-build-1` | `self-hosted, pavulla, build` | 3 CPUs, 6 GB (and its Docker engine the same) | tests, image builds |
-| `pavulla-build-2` | `self-hosted, pavulla, build` | 3 CPUs, 6 GB (and its Docker engine the same) | tests, image builds |
+| `pavulla-build-1` | `self-hosted, pavulla, build` | 3 CPUs, 6 GB (its Docker engine 3 CPUs, 4 GB) | tests, image builds |
+| `pavulla-build-2` | `self-hosted, pavulla, build` | 3 CPUs, 6 GB (its Docker engine 3 CPUs, 4 GB) | tests, image builds |
+| `pavulla-light` | `self-hosted, pavulla, light` | 1 CPU, 1.5 GB, no Docker engine | short jobs: a release's meta step, publishing it on GitHub, submitting it to KulOffice |
 | `pavulla-deploy` | `self-hosted, pavulla, deploy` | 0.5 CPU, 512 MB | deploys (SSH to the server, wait for the health check) |
 
 - Registered once to the organisation: every pavulla-tech repo can use them.
+- They give way to the server: every runner and Docker engine has a low CPU
+  weight (`cpu_shares: 256`, the default is 1024), so the dev stack and the
+  server's other services win when the CPU is contended. An idle server still
+  gives a build its 3 CPUs.
 - One job per runner at a time; more jobs wait in GitHub's queue. Deploys to the
   KulPay server also wait for each other (the `kulpay-server` concurrency group).
 - Each build runner has its own Docker engine (`dind-1`, `dind-2`): a job builds
