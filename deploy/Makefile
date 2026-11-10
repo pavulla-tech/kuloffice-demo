@@ -7,7 +7,7 @@
         images push bundle load theme license \
         start start-portal start-website stop restart logs ps update clean reset-blnk \
         init operator gateway-signin solange-kulpay gateway-kuloffice cash-deposits gateway-billers simulator-bank psp-provision qa-fixtures \
-        deploy rollback releases status health backup restore
+        deploy rollback releases status migrations health backup restore
 
 ENV_FILE ?= .env
 ENV_EXAMPLE ?= .env.example
@@ -48,6 +48,7 @@ help:
 	@echo "  make rollback U=web [STEPS=1 | TO=tag] [YES=1]"
 	@echo "  make releases [U=web]   what ran, and the last attempts"
 	@echo "  make status             each unit's current tag"
+	@echo "  make migrations         the SQL files for existing tables, run or pending (DB=kuloffice)"
 	@echo "  make health [U=web]     check the running units"
 	@echo "  make backup DB=kuloffice / make restore DB=kuloffice FILE=… YES=1"
 	@echo "  make clean              remove containers AND volumes (every database)"
@@ -367,6 +368,9 @@ releases:
 
 status:
 	@$(KULPAY) status
+
+migrations:
+	@$(KULPAY) migrations $(DB)
 
 health:
 	@$(KULPAY) health $(U)

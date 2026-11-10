@@ -315,6 +315,9 @@ tagged commit.
   If it fails, it goes back to the previous tag (and, if that fails too on
   the migrated data, to the backup), and the run turns red: GitHub emails
   whoever pushed the tag.
+- **Changes to existing tables** are SQL files in
+  [migrations/](migrations/README.md), never migration code in the service:
+  each runs once, right before the unit switches to the new tag.
 - **A new patch or minor** (`v0.1.0-*` → `v0.1.1-*`) resets the unit: its
   data is saved, wiped and started fresh, along with the units whose data
   points into it:

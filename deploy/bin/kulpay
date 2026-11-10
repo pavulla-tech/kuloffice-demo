@@ -6,6 +6,7 @@
 #   kulpay rollback <unit> [--steps N | --to TAG] [--yes]
 #   kulpay releases [unit]                       what ran, newest last
 #   kulpay status                                each unit's current tag
+#   kulpay migrations [database]                 the kit's SQL files (migrations/), run or pending
 #   kulpay health   [unit]                       check running units
 #   kulpay backup   <database>                   a backup now
 #   kulpay restore  <database> <file> --yes      replace a database
@@ -301,6 +302,85 @@ backup_db() { # database label → prints the file
   echo "$file"
 }
 
+# ── hand-written schema changes ──────────────────────────────────────────────
+# A unit's code only creates tables. A change to a table that already exists
+# (a new column, an index, a type, a rename, a backfill) is a SQL file in
+# migrations/<database>/, named YYYY-MM-DD-NN_what.sql. Each runs once, in name
+# order, in one transaction with its record in kit_migrations, as the
+# database's own role, right before the unit switches to the new tag: the
+# running version must still work with it (add first, remove in a later file).
+# A failed file keeps nothing and the deploy stops on the current tag. A fresh
+# database (a reset, a first deploy) already has every change: its files are
+# recorded without running.
+SQL_NAME='^[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]{2}_[a-z0-9_]+\.sql$'
+
+sql_files() { # database → its files, in order (names checked by sql_check)
+  local f
+  for f in migrations/"$1"/*.sql; do [[ -e $f ]] || continue; basename "$f"; done | sort
+}
+
+sql_check() { # database: dies on a misnamed file, and makes the record table
+  local f name
+  for f in migrations/"$1"/*; do
+    [[ -e $f ]] || continue
+    name=$(basename "$f")
+    [[ $name =~ $SQL_NAME ]] || die "migrations/$1/$name: name it YYYY-MM-DD-NN_what.sql"
+  done
+  [[ -n $(sql_files "$1") ]] || return 0
+  pg -d "$1" -c "SET client_min_messages = warning; SET ROLE $1; CREATE TABLE IF NOT EXISTS kit_migrations (
+    name text PRIMARY KEY, sha256 text NOT NULL, tag text NOT NULL, actor text NOT NULL,
+    baseline boolean NOT NULL DEFAULT false, applied_at timestamptz NOT NULL DEFAULT now())"
+}
+
+sql_pending() { # database → the files it has not run (after sql_check)
+  local applied name
+  [[ -n $(sql_files "$1") ]] || return 0
+  applied=$(pg -d "$1" -tA -c "SELECT name FROM kit_migrations")
+  for name in $(sql_files "$1"); do grep -qxF "$name" <<< "$applied" || echo "$name"; done
+}
+
+sql_record() { # database name tag baseline → the INSERT
+  local sum actor=${ACTOR//\'/}
+  sum=$(sha256sum "migrations/$1/$2" | cut -d' ' -f1)
+  printf "INSERT INTO kit_migrations (name, sha256, tag, actor, baseline) VALUES ('%s', '%s', '%s', '%s', %s);\n" "$2" "$sum" "$3" "$actor" "$4"
+}
+
+sql_baseline() { # database tag: records every pending file without running it
+  local name pending
+  sql_check "$1"
+  pending=$(sql_pending "$1")
+  for name in $pending; do
+    sql_record "$1" "$name" "$2" true | pg -d "$1" -c "SET ROLE $1" -f -
+    say "sql $1: $name recorded (fresh database)"
+  done
+}
+
+sql_apply() { # database tag: runs the pending files
+  local db=$1 name tables pending
+  sql_check "$db"
+  [[ -n $(sql_files "$db") ]] || return 0
+  tables=$(pg -d "$db" -tA -c "SELECT count(*) FROM pg_tables WHERE schemaname = 'public' AND tablename <> 'kit_migrations'")
+  if [[ $tables == 0 ]]; then sql_baseline "$db" "$2"; return 0; fi
+  pending=$(sql_pending "$db")
+  for name in $pending; do
+    say "sql $db: $name"
+    { printf 'SET ROLE %s;\n' "$db"; cat "migrations/$db/$name"; printf '\n'; sql_record "$db" "$name" "$2" false; } |
+      pg -1 -d "$db" -f - || die "migrations/$db/$name failed: nothing of it was kept; still on the current tag"
+  done
+}
+
+cmd_migrations() { # [database]: each file, run or pending
+  local db name applied
+  for db in ${1:-kuloffice keycloak solange gateway}; do
+    [[ -n $(sql_files "$db") ]] || { echo "$db: no files"; continue; }
+    sql_check "$db"
+    applied=$(pg -d "$db" -tA -F ' ' -c "SELECT name, tag, CASE WHEN baseline THEN 'recorded' ELSE 'ran' END, to_char(applied_at, 'YYYY-MM-DD HH24:MI') FROM kit_migrations")
+    for name in $(sql_files "$db"); do
+      grep -E "^$name " <<< "$applied" | sed "s/^/$db  /" || echo "$db  $name  pending"
+    done
+  done
+}
+
 # kuloffice's files in MinIO, through the mc image the stack already has.
 buckets() { echo "$(env_get KYC_BUCKET || true) $(env_get PENDING_BUCKET || true) $(env_get LOGO_BUCKET || true)" | awk '{
   print ($1 == "" ? "kyc" : $1), ($2 == "" ? "kyc-pending" : $2), ($3 == "" ? "logos" : $3) }'; }
@@ -383,6 +463,12 @@ restore_snapshot() { # dir [unit tag]
   done
   compose up -d $services || true  # the health check decides
   for pair in $MEMBERS; do check_unit "${pair%%=*}" || return 1; done
+}
+
+# The databases a reset of the unit starts fresh.
+wiped_databases() {
+  unit_databases "$1"
+  case $1 in keycloak | gateway) echo kuloffice ;; esac
 }
 
 # Wipes the unit's data and its dependents', then starts them at the new tag.
@@ -565,6 +651,7 @@ cmd_deploy() {
       say "backing up $db"
       backups="$backups $(backup_db "$db" "$unit-${cur:-none}")"
     done
+    for db in $(unit_databases "$unit"); do sql_apply "$db" "$tag"; done
     switch_unit "$unit" "$tag"
     compose up -d $(unit_services "$unit") || true  # the health check decides
     if check_unit "$unit"; then
@@ -596,6 +683,7 @@ cmd_deploy() {
   deps=$(unit_dependents "$unit")
   say "reset $unit${deps:+ and $deps}; saved in $snap"
   if reset_unit "$unit" "$tag"; then
+    for db in $(wiped_databases "$unit"); do sql_baseline "$db" "$tag"; done
     hist_add "$unit" "$tag" reset; log_release reset "$unit" "$cur" "$tag" ok "$snap"
     for m in $(unit_dependents "$unit"); do log_release wiped "$m" "$(unit_tag "$m")" "$(unit_tag "$m")" ok "by $unit $tag"; done
     prune_images "$unit"; prune_resets
@@ -870,6 +958,7 @@ case $command in
   rollback) cmd_rollback "$@" ;;
   releases) cmd_releases "$@" ;;
   status) cmd_status ;;
+  migrations) cmd_migrations "$@" ;;
   health) cmd_health "$@" ;;
   backup) cmd_backup "$@" ;;
   restore) cmd_restore "$@" ;;
@@ -877,5 +966,5 @@ case $command in
   operator-roles) cmd_operator_roles "$@" ;;
   qa-fixtures) cmd_qa_fixtures "$@" ;;
   secrets) gateway_secrets; kuloffice_secrets; say "generated values present in $ENV_FILE (not shown)" ;;
-  *) sed -n '2,23p' "$0" | sed 's/^# \{0,1\}//'; [[ $command == help ]] ;;
+  *) sed -n '2,24p' "$0" | sed 's/^# \{0,1\}//'; [[ $command == help ]] ;;
 esac
