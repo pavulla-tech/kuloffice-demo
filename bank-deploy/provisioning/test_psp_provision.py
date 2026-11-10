@@ -672,6 +672,28 @@ class PSPProvisionTests(unittest.TestCase):
             planning.admin = None
             planning.ensure_safeguarding_accounts()
 
+    def test_the_gateway_client_step_gets_the_keycloak_admin(self) -> None:
+        """The client script signs in as KC_BOOTSTRAP_ADMIN_*: the bank's .env
+        has only KC_ADMIN_*, so the provisioner hands them over."""
+        with tempfile.TemporaryDirectory() as directory:
+            provisioner = psp.Provisioner({"partner": {"short_name": "FNB"}, "operators": {"create_workforce_users": True}}, Path(directory))
+            seen: dict[str, str] = {}
+
+            def run(args, env=None, **_kwargs):
+                seen.update(env or {})
+                return mock.Mock(returncode=1, stdout="", stderr="")
+
+            env = {"KC_ADMIN_PASSWORD": "kc-secret", "KC_ADMIN_USER": "bank-admin"}
+            with mock.patch.dict(os.environ, env, clear=False), \
+                    mock.patch.object(provisioner, "keycloak_call", return_value=(200, {"access_token": "t"})), \
+                    mock.patch.object(psp.subprocess, "run", side_effect=run):
+                os.environ.pop("KC_BOOTSTRAP_ADMIN_PASSWORD", None)
+                os.environ.pop("KC_BOOTSTRAP_ADMIN_USERNAME", None)
+                with self.assertRaises(psp.ProvisionError):
+                    provisioner.ensure_users()
+            self.assertEqual(seen.get("KC_BOOTSTRAP_ADMIN_PASSWORD"), "kc-secret")
+            self.assertEqual(seen.get("KC_BOOTSTRAP_ADMIN_USERNAME"), "bank-admin")
+
 
 if __name__ == "__main__":
     unittest.main()

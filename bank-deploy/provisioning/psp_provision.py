@@ -693,7 +693,12 @@ class Provisioner:
             raise ProvisionError(f"Keycloak admin login failed: HTTP {status}")
         token = token_doc["access_token"]
         realm = os.environ.get("WORKFORCE_REALM", "workforce")
-        client_result = subprocess.run(["python3", "/tools/gateway_admin_client.py"], env=os.environ.copy(),
+        # The client script signs in as Keycloak's bootstrap admin: give it the
+        # deployment's admin user under the names it reads.
+        client_env = os.environ.copy()
+        client_env.setdefault("KC_BOOTSTRAP_ADMIN_USERNAME", os.environ.get("KC_ADMIN_USER", "admin"))
+        client_env.setdefault("KC_BOOTSTRAP_ADMIN_PASSWORD", os.environ["KC_ADMIN_PASSWORD"])
+        client_result = subprocess.run(["python3", "/tools/gateway_admin_client.py"], env=client_env,
                                        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=False)
         if client_result.returncode != 0:
             raise ProvisionError("could not create or update the Gateway workforce client")
