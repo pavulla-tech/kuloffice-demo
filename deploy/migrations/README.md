@@ -38,6 +38,13 @@ ALTER TABLE orders ADD COLUMN IF NOT EXISTS note text NOT NULL DEFAULT '';
 - Never edit a file that has run; add another. `make migrations` (or
   `bin/kulpay migrations [database]`) lists each file, run or pending.
 
+On the dev server KulOffice also re-runs its migrations at every start
+(`KULOFFICE_DEPLOYMENT=dev`, `KULOFFICE_DATABASE_MIGRATIONS_ALWAYS=true` in
+`.env`), so new columns and indexes appear there without a file. They still
+need one for every other database: drops, renames, NOT NULL and data fixes
+need one on dev too. KulOffice refuses to start with that setting anywhere
+but dev.
+
 Release tags check it: the service's tests build the previous tag's database,
 apply these files and compare it with a fresh one from the new tag. A column
 the code expects and no file adds fails the tag.

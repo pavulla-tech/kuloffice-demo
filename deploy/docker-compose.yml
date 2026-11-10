@@ -632,6 +632,10 @@ services:
         required: false
     environment:
       KULOFFICE_ENVIRONMENT: ${KULOFFICE_ENVIRONMENT:-production}
+      # Which stack this is (dev, pilot, production): only dev may re-run the
+      # migrations at every start (migrations/README.md).
+      KULOFFICE_DEPLOYMENT: ${KULOFFICE_DEPLOYMENT:-production}
+      KULOFFICE_DATABASE_MIGRATIONS_ALWAYS: ${KULOFFICE_DATABASE_MIGRATIONS_ALWAYS:-false}
       # Browser origins allowed to call KulOffice (KO-10, owner 2026-10-12):
       # the web app and kulportal. The mobile app is native and needs none.
       KULOFFICE_SERVER_HTTP_CORS_ALLOWED_ORIGINS: ${WEB_PUBLIC_URL},${KULPORTAL_PUBLIC_URL:-https://portal.kulpay.pavulla.com}
