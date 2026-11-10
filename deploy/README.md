@@ -300,7 +300,7 @@ git tag v0.1.0-alpha03 && git push origin v0.1.0-alpha03
 | solange | `solange` | solange, solange-console | Solange's database |
 | kulportal | `kulportal` | kulportal | none (no workflow yet) |
 | katembe-payments (kulpay-payments) | `gateway` | gateway | the gateway's database (a reset wipes kuloffice too: its top-ups hold the gateway's ids) |
-| kulpay-psp-simulator | `simulator` | simulator (bundle, not Docker Hub) | its prompts and balances (a volume) |
+| kulpay-psp-simulator | `simulator` | simulator | its prompts and balances (a volume) |
 
 Each repository's `.github/workflows/release.yml` runs its tests, then this
 repository's reusable `service.yml`, which builds with the same recipes as

@@ -146,10 +146,12 @@ push: check-images
 		eval "ref=\$${$${name}_IMAGE}:\$${$${name}_TAG}"; echo "== $$ref"; docker push "$$ref"; \
 	done
 
-# Images that never go to a registry (localhost/…): built, saved into one
+# Images that never go to a registry (localhost/…, none by default since the
+# simulator moved to Docker Hub on 2026-11-10): built, saved into one
 # archive under bundles/, copied to the server (scp), loaded there.
-BUNDLED = SIMULATOR
+BUNDLED =
 bundle: check-images
+	@[ -n "$(or $(S),$(BUNDLED))" ] || { echo "usage: make bundle S=<IMAGE> (a localhost/ image)" >&2; exit 2; }
 	@$(MAKE) --no-print-directory images S="$(or $(S),$(BUNDLED))"
 	@set -a; . ./$(ENV_FILE); set +a; set -e; refs=""; name="kulpay-images"; \
 	for n in $(or $(S),$(BUNDLED)); do \
