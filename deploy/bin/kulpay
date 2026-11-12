@@ -155,11 +155,25 @@ registry_login() {
   unset KULPAY_REGISTRY_TOKEN
 }
 
+# An image's name from .env; a unit newer than this server's .env (its
+# *_IMAGE line missing) takes .env.example's and writes it in, once.
+image_of() {
+  local v
+  v=$(env_get "$1_IMAGE")
+  if [[ -z $v ]]; then
+    v=$(awk -v k="$1_IMAGE" 'index($0, k"=") == 1 { print substr($0, length(k) + 2); exit }' "$DEPLOY_DIR/.env.example")
+    [[ -n $v ]] || die "$1_IMAGE is set neither in $ENV_FILE nor in .env.example"
+    env_set "$1_IMAGE" "$v"
+    say "$1_IMAGE was missing from $ENV_FILE: set to $v (from .env.example)" >&2
+  fi
+  printf '%s' "$v"
+}
+
 pull_unit() { # unit tag: fails before anything changes
   local name image
   registry_login
   for name in $(unit_images "$1"); do
-    image=$(env_get "${name}_IMAGE")
+    image=$(image_of "$name")
     # localhost/ images are never on a registry: they arrive in a bundle
     # (make bundle on the laptop, scp, make load here).
     if [[ $image == localhost/* ]]; then
@@ -178,7 +192,7 @@ pull_unit() { # unit tag: fails before anything changes
 prune_images() {
   local name image cur tag n=0
   for name in $(unit_images "$1"); do
-    image=$(env_get "${name}_IMAGE"); cur=$(env_get "${name}_TAG"); n=0
+    image=$(image_of "$name"); cur=$(env_get "${name}_TAG"); n=0
     while read -r tag; do
       [[ $tag == "<none>" || $tag == "$cur" ]] && continue
       n=$((n + 1))
@@ -192,7 +206,7 @@ prune_images() {
 # themes/kulpay, which then also hides the web theme: deploy a newer one.
 theme_from_image() {
   local image cid dir=$STATE/theme name=kulpay-mobile
-  image=$(env_get KEYCLOAK_IMAGE):$1
+  image=$(image_of KEYCLOAK):$1
   mkdir -p "$dir"; rm -rf "$dir/$name.new"
   cid=$(docker create "$image")
   if docker cp "$cid:/opt/keycloak/themes/$name" "$dir/$name.new" 2> /dev/null; then
