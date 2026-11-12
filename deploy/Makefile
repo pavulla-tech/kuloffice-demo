@@ -17,7 +17,7 @@ COMPOSE = ENV_FILE=$(ENV_FILE) docker compose --env-file $(ENV_FILE)
 S ?=
 
 # Every image `make images` builds, by its .env prefix.
-IMAGES = KEYCLOAK KULOFFICE WEB FILESERVER TOKEN_PANEL TOOLS SOLANGE SOLANGE_CONSOLE GATEWAY SIMULATOR
+IMAGES = KEYCLOAK KULOFFICE WEB FILESERVER TOKEN_PANEL TOOLS SOLANGE SOLANGE_CONSOLE GATEWAY SIMULATOR TESTES
 
 help:
 	@echo "Setup"
@@ -125,6 +125,8 @@ build_GATEWAY         = key=$$(cat keys/kuloffice-license.pub.base64) || exit 1;
 	docker build --platform $$TARGET_PLATFORM -t "$$GATEWAY_IMAGE:$$GATEWAY_TAG" \
 	  --build-arg LICENSE_PUBLIC_KEY="$$key" --build-arg LICENSE_ISSUER=pavulla.com "$$GATEWAY_DIR"
 build_SIMULATOR       = docker build --platform $$TARGET_PLATFORM -t "$$SIMULATOR_IMAGE:$$SIMULATOR_TAG" "$$SIMULATOR_DIR"
+# The platform test's plan and tracker (kulpay-testes), from its own Dockerfile.
+build_TESTES          = docker build --platform $$TARGET_PLATFORM -t "$$TESTES_IMAGE:$$TESTES_TAG" "$$TESTES_DIR"
 
 images: check-images
 	@set -a; . ./$(ENV_FILE); set +a; set -e; \
@@ -135,7 +137,7 @@ images: check-images
 		KEYCLOAK) $(build_KEYCLOAK) ;; KULOFFICE) $(build_KULOFFICE) ;; WEB) $(build_WEB) ;; \
 		FILESERVER) $(build_FILESERVER) ;; TOKEN_PANEL) $(build_TOKEN_PANEL) ;; TOOLS) $(build_TOOLS) ;; \
 		SOLANGE) $(build_SOLANGE) ;; SOLANGE_CONSOLE) $(build_SOLANGE_CONSOLE) ;; KULPORTAL) $(build_KULPORTAL) ;; WEBSITE) $(build_WEBSITE) ;; \
-		GATEWAY) $(build_GATEWAY) ;; SIMULATOR) $(build_SIMULATOR) ;; \
+		GATEWAY) $(build_GATEWAY) ;; SIMULATOR) $(build_SIMULATOR) ;; TESTES) $(build_TESTES) ;; \
 		*) echo "unknown image $$name" >&2; exit 1 ;; \
 		esac; \
 	done

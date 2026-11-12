@@ -15,6 +15,7 @@ The whole of KulPay on one server, in one compose stack:
 | `blnk-server`, `blnk-worker` | — | — | Pinned self-hosted BLNK API and its queue processor; internal only |
 | `gateway` | — | — | KulPay's own payments gateway (katembe-payments), live mode; KulOffice uses its public root for top-ups and its management `/v1` API for transfers, supply, Payment Acceptance and reconciliation. Internal only |
 | `simulator` | https://sim.kulpay.pavulla.com (password) | 9880 | Development only: the PSP simulator the gateway's live M-Pesa, e-Mola and card bindings point at, and its customer page |
+| `testes` | https://testes.kulpay.pavulla.com (password per person) | 9890 | The platform test's plan and tracker (kulpay-testes): flows, steps, defects; Apache passes on who signed in |
 | `db` | — | — | Postgres 17: one isolated database and role each for kuloffice, Keycloak, Solange, BLNK, the gateway |
 | `blnk-redis`, `blnk-typesense` | — | — | BLNK's durable queue and rebuildable search projection; internal only |
 | `minio`, `fileserver` | — | — | MinIO behind KulPay's own boquisso file server, where kuloffice keeps KYC files |
