@@ -104,7 +104,10 @@ baseline() {
   local cur
   [[ -s $(hist_file "$1") ]] && return
   cur=$(unit_tag "$1")
-  [[ -n $cur ]] && hist_add "$1" "$cur" baseline
+  # A unit deployed for the first time has nothing to record. (As the last
+  # line, a bare `[[ … ]] && …` returned 1 there and set -e ended the deploy
+  # without a word: testes v0.1.0-alpha01, 2026-11-12.)
+  if [[ -n $cur ]]; then hist_add "$1" "$cur" baseline; fi
 }
 
 # Deployed tags, oldest first, each at its latest deployment.
