@@ -60,6 +60,10 @@
     {"event": "business_plan.change_approved", "channel": "inbox", "text": "O seu negócio passou ao plano {plan}. Os novos limites já se aplicam."},
     {"event": "business_plan.change_rejected", "channel": "inbox", "text": "O pedido para passar ao plano {plan} não foi aprovado: {note}"},
     {"event": "business_plan.change_cancelled", "channel": "inbox", "text": "O pedido para passar ao plano {plan} foi cancelado."},
+    {"event": "business_plan.review_submitted", "channel": "inbox", "text": "Recebemos o pedido para rever o plano da sua empresa. O plano {current_plan} mantém-se até à decisão."},
+    {"event": "business_plan.review_kept", "channel": "inbox", "text": "Revimos o plano da sua empresa: mantém o plano {plan}."},
+    {"event": "business_plan.review_rejected", "channel": "inbox", "text": "O pedido para rever o plano da sua empresa não foi aprovado: {note}. Mantém o plano {current_plan}."},
+    {"event": "business_plan.review_cancelled", "channel": "inbox", "text": "O pedido para rever o plano da sua empresa foi cancelado."},
 
     {"event": "agent.application_received", "channel": "sms", "text": "Confirmado: recebemos a candidatura de {name} a Agente Kul. Vamos analisá-la e dar notícias."},
     {"event": "agent.more_info", "channel": "sms", "text": "KulPay: a candidatura de {name} a Agente Kul precisa de mais informação: {reason}. Abra a aplicação KulPay para responder."},
