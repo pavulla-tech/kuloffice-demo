@@ -5,7 +5,7 @@
 # new patch or minor version) wipes, and its dependents are the units whose
 # data refers to it and is wiped with it.
 
-UNITS="keycloak kuloffice web fileserver solange kulportal gateway simulator"
+UNITS="keycloak kuloffice web fileserver solange kulportal gateway simulator testes"
 
 is_unit() { case " $UNITS " in *" $1 "*) return 0 ;; *) return 1 ;; esac; }
 
@@ -20,6 +20,7 @@ unit_images() {
     kulportal) echo "KULPORTAL" ;;
     gateway) echo "GATEWAY" ;;
     simulator) echo "SIMULATOR" ;;
+    testes) echo "TESTES" ;;
   esac
 }
 
@@ -34,6 +35,7 @@ unit_dir_var() {
     kulportal) echo KULPORTAL_DIR ;;
     gateway) echo GATEWAY_DIR ;;
     simulator) echo SIMULATOR_DIR ;;
+    testes) echo TESTES_DIR ;;
   esac
 }
 
@@ -49,6 +51,7 @@ unit_services() {
     kulportal) echo "kulportal" ;;
     gateway) echo "gateway" ;;
     simulator) echo "simulator" ;;
+    testes) echo "testes" ;;
   esac
 }
 

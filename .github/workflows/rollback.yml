@@ -11,7 +11,7 @@ on:
     inputs:
       unit:
         type: choice
-        options: [kuloffice, web, keycloak, solange, fileserver, kulportal]
+        options: [kuloffice, web, keycloak, solange, fileserver, kulportal, testes]
       steps:
         description: How many releases back (ignored when "to" is set)
         default: "1"

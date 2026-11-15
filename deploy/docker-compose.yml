@@ -37,6 +37,7 @@ volumes:
   blnk-typesense-data:
   gateway-config:
   simulator-data:
+  testes-data:
   minio-data:
   token-panel-data:
 
@@ -499,6 +500,22 @@ services:
     healthcheck:
       test: ["CMD", "kulpay-psp-simulator", "health"]
       interval: 10s
+      timeout: 5s
+      retries: 6
+
+  # The platform test's plan and tracker (kulpay-testes): one Node process and
+  # one SQLite file. Apache authenticates (apache/testes.conf) and forwards the
+  # user as X-Remote-User; nothing else reaches it.
+  testes:
+    <<: *restart
+    image: ${TESTES_IMAGE:-developerspavs/kulpay-testes}:${TESTES_TAG}
+    volumes:
+      - testes-data:/data
+    ports:
+      - "127.0.0.1:${TESTES_PORT:-9890}:3100"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3100/api/saude').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 15s
       timeout: 5s
       retries: 6
 
