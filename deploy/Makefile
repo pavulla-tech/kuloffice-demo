@@ -346,6 +346,14 @@ gateway-signin:
 	$(COMPOSE) --profile tools run --rm tools -c 'KC_BOOTSTRAP_ADMIN_USERNAME="$${KC_ADMIN_USER:-admin}" KC_BOOTSTRAP_ADMIN_PASSWORD="$$KC_ADMIN_PASSWORD" python3 /tools/gateway_admin_client.py'
 	$(COMPOSE) up -d --force-recreate gateway-config gateway
 
+# The test platform's sign-in: its secrets into .env, its realm, roles and
+# client in Keycloak, the manager's account (TESTES_GESTOR_EMAIL, password
+# printed once), then the platform recreated to read them. Safe to repeat.
+testes-signin:
+	@bin/kulpay secrets
+	$(COMPOSE) --profile tools run --rm tools -c 'KC_BOOTSTRAP_ADMIN_USERNAME="$${KC_ADMIN_USER:-admin}" KC_BOOTSTRAP_ADMIN_PASSWORD="$$KC_ADMIN_PASSWORD" python3 /tools/testes_realm.py'
+	$(COMPOSE) up -d --force-recreate testes
+
 # KulPay's app in Solange, kuloffice's key and the webhook to kuloffice, each
 # step only if missing; the secrets go straight into .env, then kuloffice is
 # recreated to read them.

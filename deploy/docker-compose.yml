@@ -511,6 +511,13 @@ services:
     image: ${TESTES_IMAGE:-developerspavs/kulpay-testes}:${TESTES_TAG}
     volumes:
       - testes-data:/data
+    environment:
+      # Keycloak's public address: the browser and the platform both use it.
+      OIDC_ISSUER: ${KEYCLOAK_PUBLIC_URL:?set KEYCLOAK_PUBLIC_URL}/realms/${TESTES_REALM:-testes}
+      OIDC_CLIENT_ID: kulpay-testes
+      OIDC_CLIENT_SECRET: ${TESTES_OIDC_CLIENT_SECRET:-}
+      SESSION_SECRET: ${TESTES_SESSION_SECRET:-}
+      APP_URL: ${TESTES_PUBLIC_URL:-https://testes.kulpay.pavulla.com}
     ports:
       - "127.0.0.1:${TESTES_PORT:-9890}:3100"
     healthcheck:
